@@ -21,6 +21,11 @@ const unoServerSocket = socketClient(
     { transports: ["websocket"] }
 );
 
+const tabooServerSocket = socketClient(
+    process.env.TABOO_SERVER_URL ?? "http://localhost:10003",
+    { transports: ["websocket"] }
+);
+
 const lobbies = new Map();
 
 // ── Lobby helpers ────────────────────────────────────────────────────────────
@@ -35,7 +40,7 @@ function emitLobbyState(io, lobbyId, lobby) {
         players: Array.from(lobby.players.values()),
         gameType: lobby.gameType ?? "quiz",
         unoOptions: lobby.unoOptions ?? { stackable: false, jumpIn: false, teamMode: "none", teamWinMode: "one" },
-        tabooOptions: lobby.tabooOptions ?? { turnDuration: 60, totalRounds: 3, trapWordCount: 5, maxAttempts: 10 },
+        tabooOptions: lobby.tabooOptions ?? { turnDuration: 60, totalRounds: 3, trapWordCount: 5, maxAttempts: 10, trapDuration: 60 },
         teams: lobby.teams ? Object.fromEntries(lobby.teams) : null,
         orators: lobby.orators ?? { "0": null, "1": null },
     });
@@ -55,7 +60,7 @@ function removePlayerAndMaybeTransferHost({ io, lobbyId, userId }) {
 // ── Socket connections ───────────────────────────────────────────────────────
 
 io.on("connection", (socket) => {
-    console.log("nouvelle connexion", socket.id);
+    console.log("nouvelle connexion lobby", socket.id);
 
     socket.on("lobby:join", ({ lobbyId, userId, username }) => {
         if (!lobbyId || !userId) return;
@@ -67,14 +72,14 @@ io.on("connection", (socket) => {
                 hostId: userId, quizId: null, status: "WAITING", timePerQuestion: 15, timeMode: "per_question",
                 players: new Map(), resultViewers: new Set(), gameType: "quiz",
                 unoOptions: { stackable: false, jumpIn: false, teamMode: "none", teamWinMode: "one" },
-                tabooOptions: { turnDuration: 60, totalRounds: 3, trapWordCount: 5, maxAttempts: 10 },
+                tabooOptions: { turnDuration: 60, totalRounds: 3, trapWordCount: 5, maxAttempts: 10, trapDuration: 60 },
                 teams: null,
             };
         }
         if (!lobby.hostId) lobby.hostId = userId;
         if (!lobby.resultViewers) lobby.resultViewers = new Set();
         if (!lobby.teams) lobby.teams = null;
-        if (!lobby.tabooOptions) lobby.tabooOptions = { turnDuration: 60, totalRounds: 3, trapWordCount: 5, maxAttempts: 10 };
+        if (!lobby.tabooOptions) lobby.tabooOptions = { turnDuration: 60, totalRounds: 3, trapWordCount: 5, maxAttempts: 10, trapDuration: 60 };
         if (!lobby.orators) lobby.orators = { "0": null, "1": null };
         lobby.players.set(userId, { userId, username });
         lobbies.set(lobbyId, lobby);
@@ -192,12 +197,12 @@ io.on("connection", (socket) => {
         emitLobbyState(io, lobbyId, lobby);
     });
 
-    socket.on("lobby:setTabooOptions", ({ turnDuration, totalRounds, trapWordCount, maxAttempts }) => {
+    socket.on("lobby:setTabooOptions", ({ turnDuration, totalRounds, trapWordCount, maxAttempts, trapDuration }) => {
         const { lobbyId, userId } = socket.data || {};
         if (!lobbyId || !userId) return;
         const lobby = lobbies.get(lobbyId);
         if (!lobby || lobby.hostId !== userId) return;
-        if (!lobby.tabooOptions) lobby.tabooOptions = { turnDuration: 60, totalRounds: 3, trapWordCount: 5, maxAttempts: 10 };
+        if (!lobby.tabooOptions) lobby.tabooOptions = { turnDuration: 60, totalRounds: 3, trapWordCount: 5, maxAttempts: 10, trapDuration: 60 };
         const td = Number(turnDuration);
         if (Number.isFinite(td) && td >= 15 && td <= 300) lobby.tabooOptions.turnDuration = td;
         const tr = Number(totalRounds);
@@ -206,6 +211,8 @@ io.on("connection", (socket) => {
         if (Number.isFinite(tw) && tw >= 1 && tw <= 10) lobby.tabooOptions.trapWordCount = tw;
         const ma = Number(maxAttempts);
         if (Number.isFinite(ma) && ma >= 1 && ma <= 30) lobby.tabooOptions.maxAttempts = ma;
+        const trapd = Number(trapDuration);
+        if (Number.isFinite(trapd) && trapd >= 15 && trapd <= 300) lobby.tabooOptions.trapDuration = trapd;
         emitLobbyState(io, lobbyId, lobby);
     });
 
@@ -271,6 +278,14 @@ io.on("connection", (socket) => {
             unoServerSocket.emit("uno:configure", { lobbyId, options: opts, expectedCount: lobby.players.size, preAssignedTeams: lobby.teams ? Object.fromEntries(lobby.teams) : null });
             io.to(`lobby:${lobbyId}`).emit("game:start", { gameType: "uno", lobbyId });
         } else if (gameType === "taboo") {
+            const opts = lobby.tabooOptions ?? { turnDuration: 60, totalRounds: 3, trapWordCount: 5, maxAttempts: 10, trapDuration: 60 };
+            tabooServerSocket.emit("taboo:configure", {
+                lobbyId,
+                options: opts,
+                teams: lobby.teams ? Object.fromEntries(lobby.teams) : null,
+                orators: lobby.orators ?? { "0": null, "1": null },
+                hostId: lobby.hostId,
+            });
             io.to(`lobby:${lobbyId}`).emit("game:start", { gameType: "taboo", lobbyId });
         } else {
             io.to(`lobby:${lobbyId}`).emit("game:start", { gameType: "quiz", quizId: lobby.quizId, timeMode: lobby.timeMode, timePerQuestion: lobby.timePerQuestion });
