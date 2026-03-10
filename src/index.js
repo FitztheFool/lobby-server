@@ -296,9 +296,11 @@ io.on("connection", (socket) => {
             });
             io.to(`lobby:${lobbyId}`).emit("game:start", { gameType: "taboo", lobbyId });
         } else if (gameType === "skyjow") {
+            console.log('[lobby] skyjowServerSocket connected?', skyjowServerSocket.connected);
             const players = Array.from(lobby.players.values());
             const opts = lobby.skyjowOptions ?? { eliminateRows: false };
             skyjowServerSocket.emit("skyjow:configure", { lobbyId, players, options: opts });
+            console.log('[lobby] skyjow:configure émis pour', lobbyId, 'players:', players.length);
             io.to(`lobby:${lobbyId}`).emit("game:start", { gameType: "skyjow", lobbyId });
         } else {
             io.to(`lobby:${lobbyId}`).emit("game:start", { gameType: "quiz", quizId: lobby.quizId, timeMode: lobby.timeMode, timePerQuestion: lobby.timePerQuestion });
