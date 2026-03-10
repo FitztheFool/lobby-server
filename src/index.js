@@ -26,6 +26,11 @@ const tabooServerSocket = socketClient(
     { transports: ["websocket"] }
 );
 
+const skyjowServerSocket = socketClient(
+    process.env.SKYJOW_SERVER_URL ?? "http://localhost:10004",
+    { transports: ["websocket"] }
+);
+
 const lobbies = new Map();
 
 // ── Lobby helpers ────────────────────────────────────────────────────────────
@@ -43,6 +48,7 @@ function emitLobbyState(io, lobbyId, lobby) {
         tabooOptions: lobby.tabooOptions ?? { turnDuration: 60, totalRounds: 3, trapWordCount: 5, maxAttempts: 10, trapDuration: 60 },
         teams: lobby.teams ? Object.fromEntries(lobby.teams) : null,
         orators: lobby.orators ?? { "0": null, "1": null },
+        skyjowOptions: lobby.skyjowOptions ?? { eliminateRows: false },
     });
 }
 
@@ -81,6 +87,7 @@ io.on("connection", (socket) => {
         if (!lobby.teams) lobby.teams = null;
         if (!lobby.tabooOptions) lobby.tabooOptions = { turnDuration: 60, totalRounds: 3, trapWordCount: 5, maxAttempts: 10, trapDuration: 60 };
         if (!lobby.orators) lobby.orators = { "0": null, "1": null };
+        if (!lobby.skyjowOptions) lobby.skyjowOptions = { eliminateRows: false };
         lobby.players.set(userId, { userId, username });
         lobbies.set(lobbyId, lobby);
         emitLobbyState(io, lobbyId, lobby);
@@ -175,9 +182,9 @@ io.on("connection", (socket) => {
         if (!lobbyId || !userId) return;
         const lobby = lobbies.get(lobbyId);
         if (!lobby || lobby.hostId !== userId) return;
-        if (!["quiz", "uno", "taboo"].includes(gameType)) return;
+        if (!["quiz", "uno", "taboo", "skyjow"].includes(gameType)) return;
         lobby.gameType = gameType;
-        if (gameType === "uno" || gameType === "taboo") lobby.quizId = null;
+        if (gameType === "uno" || gameType === "taboo" || gameType === "skyjow") lobby.quizId = null;
         emitLobbyState(io, lobbyId, lobby);
     });
 
@@ -258,6 +265,7 @@ io.on("connection", (socket) => {
         if (!lobby || lobby.hostId !== userId) return;
         const gameType = lobby.gameType ?? "quiz";
         if (gameType === "quiz" && !lobby.quizId) return;
+        if (gameType === "skyjow" && (lobby.players.size < 2 || lobby.players.size > 8)) return;
         if (gameType === "taboo") {
             if (!lobby.teams || lobby.teams.size < 4) return;
             const t0 = Array.from(lobby.teams.values()).filter(t => t === 0).length;
@@ -287,9 +295,24 @@ io.on("connection", (socket) => {
                 hostId: lobby.hostId,
             });
             io.to(`lobby:${lobbyId}`).emit("game:start", { gameType: "taboo", lobbyId });
+        } else if (gameType === "skyjow") {
+            const players = Array.from(lobby.players.values());
+            const opts = lobby.skyjowOptions ?? { eliminateRows: false };
+            skyjowServerSocket.emit("skyjow:configure", { lobbyId, players, options: opts });
+            io.to(`lobby:${lobbyId}`).emit("game:start", { gameType: "skyjow", lobbyId });
         } else {
             io.to(`lobby:${lobbyId}`).emit("game:start", { gameType: "quiz", quizId: lobby.quizId, timeMode: lobby.timeMode, timePerQuestion: lobby.timePerQuestion });
         }
+    });
+
+    socket.on("lobby:setSkyjowOptions", ({ eliminateRows }) => {
+        const { lobbyId, userId } = socket.data || {};
+        if (!lobbyId || !userId) return;
+        const lobby = lobbies.get(lobbyId);
+        if (!lobby || lobby.hostId !== userId) return;
+        if (!lobby.skyjowOptions) lobby.skyjowOptions = { eliminateRows: false };
+        if (typeof eliminateRows === "boolean") lobby.skyjowOptions.eliminateRows = eliminateRows;
+        emitLobbyState(io, lobbyId, lobby);
     });
 
     socket.on("chat:send", ({ text }) => {
