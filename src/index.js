@@ -36,17 +36,6 @@ const yahtzeeServerSocket = socketClient(
     { transports: ["websocket"] }
 );
 
-// Ajoute juste ici ↓
-yahtzeeServerSocket.on("connect", () => {
-    console.log("[LOBBY] ✅ Connecté au yahtzee-server");
-});
-yahtzeeServerSocket.on("connect_error", (err) => {
-    console.log("[LOBBY] ❌ Erreur connexion yahtzee-server:", err.message);
-});
-yahtzeeServerSocket.on("disconnect", (reason) => {
-    console.log("[LOBBY] ⚠️ Déconnecté du yahtzee-server:", reason);
-});
-
 yahtzeeServerSocket.on("yahtzee:state:relay", (state) => {
     console.log("[LOBBY] relay yahtzee:state vers lobby:", state.code);
     io.to(`lobby:${state.code}`).emit("yahtzee:state", state);
