@@ -197,7 +197,7 @@ io.on("connection", (socket) => {
         if (!lobbyId || !userId) return;
         const lobby = lobbies.get(lobbyId);
         if (!lobby || lobby.hostId !== userId) return;
-        if (!["quiz", "uno", "taboo", "skyjow", "yahtzee"].includes(gameType)) return;
+        if (!["quiz", "uno", "taboo", "skyjow", "yahtzee", "puissance4"].includes(gameType)) return;
         lobby.gameType = gameType;
         if (gameType !== "quiz") lobby.quizId = null;
         emitLobbyState(io, lobbyId, lobby);
@@ -281,6 +281,7 @@ io.on("connection", (socket) => {
         const gameType = lobby.gameType ?? "quiz";
         if (gameType === "quiz" && !lobby.quizId) return;
         if (gameType === "skyjow" && (lobby.players.size < 2 || lobby.players.size > 8)) return;
+        if (gameType === "puissance4" && lobby.players.size !== 2) return;
         if (gameType === "yahtzee" && (lobby.players.size < 2 || lobby.players.size > 8)) return;
         if (gameType === "taboo") {
             if (!lobby.teams || lobby.teams.size < 4) return;
@@ -320,6 +321,8 @@ io.on("connection", (socket) => {
             const players = Array.from(lobby.players.values());
             yahtzeeServerSocket.emit("yahtzee:init", { lobbyId, players });
             io.to(`lobby:${lobbyId}`).emit("game:start", { gameType: "yahtzee", lobbyId });
+        } else if (gameType === "puissance4") {
+            io.to(`lobby:${lobbyId}`).emit("game:start", { gameType: "puissance4", lobbyId });
         } else {
             io.to(`lobby:${lobbyId}`).emit("game:start", { gameType: "quiz", quizId: lobby.quizId, timeMode: lobby.timeMode, timePerQuestion: lobby.timePerQuestion });
         }
