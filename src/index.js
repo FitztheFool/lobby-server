@@ -36,15 +36,6 @@ const yahtzeeServerSocket = socketClient(
     { transports: ["websocket"] }
 );
 
-yahtzeeServerSocket.on("yahtzee:state:relay", (state) => {
-    console.log("[LOBBY] relay yahtzee:state vers lobby:", state.code);
-    io.to(`lobby:${state.code}`).emit("yahtzee:state", state);
-});
-yahtzeeServerSocket.on("yahtzee:ended", (data) => {
-    if (data.results && data.results[0]) {
-        io.to(`lobby:${data.results[0].code ?? ""}`).emit("yahtzee:ended", data);
-    }
-});
 const lobbies = new Map();
 
 // ── Lobby helpers ────────────────────────────────────────────────────────────
@@ -63,6 +54,10 @@ function emitLobbyState(io, lobbyId, lobby) {
         teams: lobby.teams ? Object.fromEntries(lobby.teams) : null,
         orators: lobby.orators ?? { "0": null, "1": null },
         skyjowOptions: lobby.skyjowOptions ?? { eliminateRows: false },
+        title: lobby.title ?? null,
+        description: lobby.description ?? null,
+        maxPlayers: lobby.maxPlayers ?? 8,
+        isPublic: lobby.isPublic ?? true,
     });
 }
 
@@ -72,9 +67,27 @@ function removePlayerAndMaybeTransferHost({ io, lobbyId, userId }) {
     if (lobby.resultViewers?.has(userId)) { lobby.resultViewers.delete(userId); return; }
     lobby.players.delete(userId);
     if (lobby.teams) lobby.teams.delete(userId);
-    if (lobby.players.size === 0) { lobbies.delete(lobbyId); return; }
+    if (lobby.players.size === 0) { lobbies.delete(lobbyId); broadcastLobbies(io); return; }
     if (lobby.hostId === userId) lobby.hostId = Array.from(lobby.players.values())[0].userId;
     emitLobbyState(io, lobbyId, lobby);
+    broadcastLobbies(io);
+}
+
+function broadcastLobbies(io) {
+    const lobbyList = Array.from(lobbies.entries())
+        .filter(([, lobby]) => lobby.isPublic !== false)
+        .map(([id, lobby]) => ({
+            id,
+            title: lobby.title ?? `Lobby de ${Array.from(lobby.players.values())[0]?.username ?? "?"}`,
+            description: lobby.description ?? "",
+            gameType: lobby.gameType ?? "quiz",
+            maxPlayers: lobby.maxPlayers ?? 8,
+            currentPlayers: lobby.players.size,
+            status: lobby.status === "WAITING" ? "waiting" : "in-progress",
+            host: Array.from(lobby.players.values()).find(p => p.userId === lobby.hostId)?.username ?? "?",
+            playerNames: Array.from(lobby.players.values()).map(p => p.username),
+        }));
+    io.emit("lobbies", lobbyList);
 }
 
 // ── Socket connections ───────────────────────────────────────────────────────
@@ -82,18 +95,22 @@ function removePlayerAndMaybeTransferHost({ io, lobbyId, userId }) {
 io.on("connection", (socket) => {
     console.log("nouvelle connexion lobby", socket.id);
 
-    socket.on("lobby:join", ({ lobbyId, userId, username }) => {
+    socket.on("lobby:join", ({ lobbyId, userId, username, title, description, maxPlayers }) => {
         if (!lobbyId || !userId) return;
         socket.data = { lobbyId, userId, username };
         socket.join(`lobby:${lobbyId}`);
         let lobby = lobbies.get(lobbyId);
         if (!lobby) {
             lobby = {
+                isPublic: typeof isPublic === 'boolean' ? isPublic : true,
                 hostId: userId, quizId: null, status: "WAITING", timePerQuestion: 15, timeMode: "per_question",
                 players: new Map(), resultViewers: new Set(), gameType: "quiz",
                 unoOptions: { stackable: false, jumpIn: false, teamMode: "none", teamWinMode: "one" },
                 tabooOptions: { turnDuration: 60, totalRounds: 3, trapWordCount: 5, maxAttempts: 10, trapDuration: 60 },
                 teams: null,
+                title: title ?? null,
+                description: description ?? "",
+                maxPlayers: (Number.isFinite(Number(maxPlayers)) && Number(maxPlayers) >= 2) ? Number(maxPlayers) : 8,
             };
         }
         if (!lobby.hostId) lobby.hostId = userId;
@@ -105,6 +122,20 @@ io.on("connection", (socket) => {
         lobby.players.set(userId, { userId, username });
         lobbies.set(lobbyId, lobby);
         emitLobbyState(io, lobbyId, lobby);
+        broadcastLobbies(io);
+    });
+
+    socket.on("lobby:setMeta", ({ title, description, maxPlayers, isPublic }) => {
+        const { lobbyId, userId } = socket.data || {};
+        if (!lobbyId || !userId) return;
+        const lobby = lobbies.get(lobbyId);
+        if (!lobby || lobby.hostId !== userId) return;
+        if (title && typeof title === "string") lobby.title = title.slice(0, 60);
+        if (typeof description === "string") lobby.description = description.slice(0, 200);
+        if (Number.isFinite(Number(maxPlayers)) && Number(maxPlayers) >= 2) lobby.maxPlayers = Number(maxPlayers);
+        if (typeof isPublic === "boolean") lobby.isPublic = isPublic;
+        emitLobbyState(io, lobbyId, lobby);
+        broadcastLobbies(io);
     });
 
     socket.on("lobby:setOrator", ({ targetUserId }) => {
@@ -149,6 +180,7 @@ io.on("connection", (socket) => {
         if (lobby.teams) lobby.teams.delete(targetUserId);
         if (lobby.players.size === 0) { lobbies.delete(lobbyId); return; }
         emitLobbyState(io, lobbyId, lobby);
+        broadcastLobbies(io);
     });
 
     socket.on("lobby:transferHost", ({ targetUserId }) => {
@@ -159,6 +191,7 @@ io.on("connection", (socket) => {
         if (!lobby.players.has(targetUserId)) return;
         lobby.hostId = targetUserId;
         emitLobbyState(io, lobbyId, lobby);
+        broadcastLobbies(io);
     });
 
     socket.on("lobby:setTimeMode", ({ timeMode }) => {
@@ -191,7 +224,6 @@ io.on("connection", (socket) => {
         emitLobbyState(io, lobbyId, lobby);
     });
 
-    // ── CORRECTION 1 : ajout de "yahtzee" dans les gameTypes autorisés ───────
     socket.on("lobby:setGameType", ({ gameType }) => {
         const { lobbyId, userId } = socket.data || {};
         if (!lobbyId || !userId) return;
@@ -200,6 +232,8 @@ io.on("connection", (socket) => {
         if (!["quiz", "uno", "taboo", "skyjow", "yahtzee", "puissance4"].includes(gameType)) return;
         lobby.gameType = gameType;
         if (gameType !== "quiz") lobby.quizId = null;
+        if (gameType === "puissance4") lobby.maxPlayers = 2;
+        if (gameType === "uno" && lobby.unoOptions?.teamMode === "2v2") lobby.maxPlayers = 4;
         emitLobbyState(io, lobbyId, lobby);
     });
 
@@ -344,22 +378,24 @@ io.on("connection", (socket) => {
         io.to(`lobby:${lobbyId}`).emit("chat:new", { userId, username, text: String(text || "").slice(0, 500), sentAt: Date.now() });
     });
 
-    socket.on("yahtzee:join", ({ lobbyId }) => {
-        console.log("[LOBBY] yahtzee:join reçu pour", lobbyId);
-        socket.join(`lobby:${lobbyId}`);
-        yahtzeeServerSocket.emit("yahtzee:join", { lobbyId, playerId: socket.id });
-        // Re-request state in case it was already sent
-        yahtzeeServerSocket.emit("yahtzee:getState", { lobbyId });
+    socket.on("get:lobbies", () => {
+        const lobbyList = Array.from(lobbies.entries())
+            .filter(([, lobby]) => lobby.isPublic !== false)
+            .map(([id, lobby]) => ({
+                id,
+                title: lobby.title ?? `Lobby de ${Array.from(lobby.players.values())[0]?.username ?? "?"}`,
+                description: lobby.description ?? "",
+                gameType: lobby.gameType ?? "quiz",
+                maxPlayers: lobby.maxPlayers ?? 8,
+                currentPlayers: lobby.players.size,
+                status: lobby.status === "WAITING" ? "waiting" : "in-progress",
+                host: Array.from(lobby.players.values()).find(p => p.userId === lobby.hostId)?.username ?? "?",
+                playerNames: Array.from(lobby.players.values()).map(p => p.username),
+            }));
+        socket.emit("lobbies", lobbyList);
     });
-    socket.on("yahtzee:roll", ({ lobbyId }) => {
-        yahtzeeServerSocket.emit("yahtzee:roll", { lobbyId, playerId: socket.id });
-    });
-    socket.on("yahtzee:hold", ({ lobbyId, index }) => {
-        yahtzeeServerSocket.emit("yahtzee:hold", { lobbyId, playerId: socket.id, index });
-    });
-    socket.on("yahtzee:score", ({ lobbyId, category }) => {
-        yahtzeeServerSocket.emit("yahtzee:score", { lobbyId, playerId: socket.id, category });
-    });
+
+
     socket.on("disconnect", () => {
         const { lobbyId, userId } = socket.data || {};
         if (!lobbyId || !userId) return;
