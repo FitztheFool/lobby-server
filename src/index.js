@@ -57,7 +57,7 @@ function emitLobbyState(io, lobbyId, lobby) {
         title: lobby.title ?? null,
         description: lobby.description ?? null,
         maxPlayers: lobby.maxPlayers ?? 8,
-        isPublic: lobby.isPublic ?? true,
+        isPublic: lobby.isPublic ?? false,
     });
 }
 
@@ -95,14 +95,14 @@ function broadcastLobbies(io) {
 io.on("connection", (socket) => {
     console.log("nouvelle connexion lobby", socket.id);
 
-    socket.on("lobby:join", ({ lobbyId, userId, username, title, description, maxPlayers }) => {
+    socket.on("lobby:join", ({ lobbyId, userId, username, title, description, maxPlayers, isPublic }) => {
         if (!lobbyId || !userId) return;
         socket.data = { lobbyId, userId, username };
         socket.join(`lobby:${lobbyId}`);
         let lobby = lobbies.get(lobbyId);
         if (!lobby) {
             lobby = {
-                isPublic: typeof isPublic === 'boolean' ? isPublic : true,
+                isPublic: typeof isPublic === 'boolean' ? isPublic : false,
                 hostId: userId, quizId: null, status: "WAITING", timePerQuestion: 15, timeMode: "per_question",
                 players: new Map(), resultViewers: new Set(), gameType: "quiz",
                 unoOptions: { stackable: false, jumpIn: false, teamMode: "none", teamWinMode: "one" },
@@ -235,6 +235,7 @@ io.on("connection", (socket) => {
         if (gameType === "puissance4") lobby.maxPlayers = 2;
         if (gameType === "uno" && lobby.unoOptions?.teamMode === "2v2") lobby.maxPlayers = 4;
         emitLobbyState(io, lobbyId, lobby);
+        broadcastLobbies(io);
     });
 
     socket.on("lobby:setUnoOptions", ({ stackable, jumpIn, teamMode, teamWinMode }) => {
