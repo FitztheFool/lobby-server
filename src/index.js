@@ -36,6 +36,11 @@ const yahtzeeServerSocket = socketClient(
     { transports: ["websocket"] }
 );
 
+const justOneServerSocket = socketClient(
+    process.env.JUST_ONE_SERVER_URL ?? "http://localhost:10007",
+    { transports: ["websocket"] }
+);
+
 const lobbies = new Map();
 
 // ── Lobby helpers ────────────────────────────────────────────────────────────
@@ -123,6 +128,28 @@ io.on("connection", (socket) => {
         lobbies.set(lobbyId, lobby);
         emitLobbyState(io, lobbyId, lobby);
         broadcastLobbies(io);
+    });
+
+    socket.on('chat:send', ({ text, team }) => {
+        const { lobbyId, userId, username } = socket.data;
+        if (!lobbyId || !text) return;
+        const msg = { userId, username, text, sentAt: Date.now() };
+        if (team === 0 || team === 1) {
+            io.to(`lobby:${lobbyId}:team:${team}`).emit('chat:message:team', msg);
+        } else {
+            io.to(`lobby:${lobbyId}`).emit('chat:message', msg);
+        }
+    });
+
+    socket.on('chat:joinTeam', ({ team }) => {
+        const { lobbyId } = socket.data || {};
+        if (!lobbyId) return;
+        // Quitter les anciennes rooms d'équipe
+        socket.leave(`lobby:${lobbyId}:team:0`);
+        socket.leave(`lobby:${lobbyId}:team:1`);
+        if (team === 0 || team === 1) {
+            socket.join(`lobby:${lobbyId}:team:${team}`);
+        }
     });
 
     socket.on("lobby:setMeta", ({ title, description, maxPlayers, isPublic }) => {
@@ -229,11 +256,12 @@ io.on("connection", (socket) => {
         if (!lobbyId || !userId) return;
         const lobby = lobbies.get(lobbyId);
         if (!lobby || lobby.hostId !== userId) return;
-        if (!["quiz", "uno", "taboo", "skyjow", "yahtzee", "puissance4"].includes(gameType)) return;
+        if (!["quiz", "uno", "taboo", "skyjow", "yahtzee", "puissance4", "just-one"].includes(gameType)) return;
         lobby.gameType = gameType;
         if (gameType !== "quiz") lobby.quizId = null;
         if (gameType === "puissance4") lobby.maxPlayers = 2;
         if (gameType === "uno" && lobby.unoOptions?.teamMode === "2v2") lobby.maxPlayers = 4;
+        if (gameType === "just-one") lobby.maxPlayers = 7;
         emitLobbyState(io, lobbyId, lobby);
         broadcastLobbies(io);
     });
@@ -358,6 +386,10 @@ io.on("connection", (socket) => {
             io.to(`lobby:${lobbyId}`).emit("game:start", { gameType: "yahtzee", lobbyId });
         } else if (gameType === "puissance4") {
             io.to(`lobby:${lobbyId}`).emit("game:start", { gameType: "puissance4", lobbyId });
+        } else if (gameType === "just-one") {
+            const players = Array.from(lobby.players.values()); // [{ userId, username }]
+            justOneServerSocket.emit("just-one:configure", { lobbyId, players });
+            io.to(`lobby:${lobbyId}`).emit("game:start", { gameType: "just-one", lobbyId });
         } else {
             io.to(`lobby:${lobbyId}`).emit("game:start", { gameType: "quiz", quizId: lobby.quizId, timeMode: lobby.timeMode, timePerQuestion: lobby.timePerQuestion });
         }
@@ -371,12 +403,6 @@ io.on("connection", (socket) => {
         if (!lobby.skyjowOptions) lobby.skyjowOptions = { eliminateRows: false };
         if (typeof eliminateRows === "boolean") lobby.skyjowOptions.eliminateRows = eliminateRows;
         emitLobbyState(io, lobbyId, lobby);
-    });
-
-    socket.on("chat:send", ({ text }) => {
-        const { lobbyId, userId, username } = socket.data || {};
-        if (!lobbyId || !userId) return;
-        io.to(`lobby:${lobbyId}`).emit("chat:new", { userId, username, text: String(text || "").slice(0, 500), sentAt: Date.now() });
     });
 
     socket.on("get:lobbies", () => {
