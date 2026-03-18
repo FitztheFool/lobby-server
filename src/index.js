@@ -1,3 +1,4 @@
+// lobby-server/src/index.js
 const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
@@ -100,31 +101,63 @@ function broadcastLobbies(io) {
 io.on("connection", (socket) => {
     console.log("nouvelle connexion lobby", socket.id);
 
-    socket.on("lobby:join", ({ lobbyId, userId, username, title, description, maxPlayers, isPublic }) => {
-        if (!lobbyId || !userId) return;
+    socket.on("lobby:join", ({ lobbyId, userId, username, title, description, maxPlayers, isPublic, gameType }) => {
+        if (!lobbyId || !userId || !username) return;
+
         socket.data = { lobbyId, userId, username };
         socket.join(`lobby:${lobbyId}`);
+
+        // Récupération ou création du lobby
         let lobby = lobbies.get(lobbyId);
+        const defaultMaxPlayers = 8;
+
         if (!lobby) {
             lobby = {
                 isPublic: typeof isPublic === 'boolean' ? isPublic : false,
-                hostId: userId, quizId: null, status: "WAITING", timePerQuestion: 15, timeMode: "per_question",
-                players: new Map(), resultViewers: new Set(), gameType: "quiz",
-                unoOptions: { stackable: false, jumpIn: false, teamMode: "none", teamWinMode: "one" },
-                tabooOptions: { turnDuration: 60, totalRounds: 3, trapWordCount: 5, maxAttempts: 10, trapDuration: 60 },
+                hostId: userId,
+                quizId: null,
+                status: "WAITING",
+                timePerQuestion: 15,
+                timeMode: "per_question",
+                players: new Map(),
+                resultViewers: new Set(),
                 teams: null,
                 title: title ?? null,
                 description: description ?? "",
-                maxPlayers: (Number.isFinite(Number(maxPlayers)) && Number(maxPlayers) >= 2) ? Number(maxPlayers) : 8,
+                maxPlayers: (Number.isFinite(Number(maxPlayers)) && Number(maxPlayers) >= 2) ? Number(maxPlayers) : defaultMaxPlayers,
+                gameType: gameType ?? "quiz",
+                unoOptions: { stackable: false, jumpIn: false, teamMode: "none", teamWinMode: "one" },
+                tabooOptions: { turnDuration: 60, totalRounds: 3, trapWordCount: 5, maxAttempts: 10, trapDuration: 60 },
+                skyjowOptions: { eliminateRows: false },
+                battleshipOptions: { gridSize: 10, ships: [5, 4, 3, 3, 2] },
+                orators: { "0": null, "1": null }
             };
         }
-        if (!lobby.hostId) lobby.hostId = userId;
-        if (!lobby.resultViewers) lobby.resultViewers = new Set();
-        if (!lobby.teams) lobby.teams = null;
-        if (!lobby.tabooOptions) lobby.tabooOptions = { turnDuration: 60, totalRounds: 3, trapWordCount: 5, maxAttempts: 10, trapDuration: 60 };
-        if (!lobby.orators) lobby.orators = { "0": null, "1": null };
-        if (!lobby.skyjowOptions) lobby.skyjowOptions = { eliminateRows: false };
-        lobby.players.set(userId, { userId, username });
+
+        // Vérification limite de joueurs
+        if (lobby.players.has(userId)) {
+            // Reconnexion : on met à jour le username si besoin
+            lobby.players.set(userId, { userId, username });
+        } else if (lobby.players.size >= lobby.maxPlayers) {
+            // Lobby plein
+            socket.emit("lobby:full", { lobbyId });
+            return;
+        } else {
+            // Nouveau joueur
+            lobby.players.set(userId, { userId, username });
+        }
+
+        // Garantir les champs par défaut
+        lobby.hostId ||= userId;
+        lobby.resultViewers ||= new Set();
+        lobby.teams ||= null;
+        lobby.orators ||= { "0": null, "1": null };
+        lobby.unoOptions ||= { stackable: false, jumpIn: false, teamMode: "none", teamWinMode: "one" };
+        lobby.tabooOptions ||= { turnDuration: 60, totalRounds: 3, trapWordCount: 5, maxAttempts: 10, trapDuration: 60 };
+        lobby.skyjowOptions ||= { eliminateRows: false };
+        lobby.battleshipOptions ||= { gridSize: 10, ships: [5, 4, 3, 3, 2] };
+
+        // Sauvegarde et émission
         lobbies.set(lobbyId, lobby);
         emitLobbyState(io, lobbyId, lobby);
         broadcastLobbies(io);
@@ -256,10 +289,11 @@ io.on("connection", (socket) => {
         if (!lobbyId || !userId) return;
         const lobby = lobbies.get(lobbyId);
         if (!lobby || lobby.hostId !== userId) return;
-        if (!["quiz", "uno", "taboo", "skyjow", "yahtzee", "puissance4", "just-one"].includes(gameType)) return;
+        if (!["quiz", "uno", "taboo", "skyjow", "yahtzee", "puissance4", "just-one", "battleship"].includes(gameType)) return;
         lobby.gameType = gameType;
         if (gameType !== "quiz") lobby.quizId = null;
         if (gameType === "puissance4") lobby.maxPlayers = 2;
+        if (gameType === "battleship") lobby.maxPlayers = 2;
         if (gameType === "uno" && lobby.unoOptions?.teamMode === "2v2") lobby.maxPlayers = 4;
         if (gameType === "just-one") lobby.maxPlayers = 7;
         emitLobbyState(io, lobbyId, lobby);
@@ -390,6 +424,8 @@ io.on("connection", (socket) => {
             const players = Array.from(lobby.players.values()); // [{ userId, username }]
             justOneServerSocket.emit("just-one:configure", { lobbyId, players });
             io.to(`lobby:${lobbyId}`).emit("game:start", { gameType: "just-one", lobbyId });
+        } else if (gameType === "battleship") {
+            io.to(`lobby:${lobbyId}`).emit("game:start", { gameType: "battleship", lobbyId });
         } else {
             io.to(`lobby:${lobbyId}`).emit("game:start", { gameType: "quiz", quizId: lobby.quizId, timeMode: lobby.timeMode, timePerQuestion: lobby.timePerQuestion });
         }
