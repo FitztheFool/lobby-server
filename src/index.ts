@@ -1,8 +1,8 @@
-// lobby-server/src/index.js
-const express = require("express");
-const http = require("http");
-const { Server } = require("socket.io");
-const { io: socketClient } = require("socket.io-client");
+// lobby-server/src/index.ts
+import express from "express";
+import http from "http";
+import { Server } from "socket.io";
+import { io as socketClient } from "socket.io-client";
 
 const app = express();
 app.get("/health", (req, res) => res.status(200).send("ok"));
@@ -42,7 +42,7 @@ const justOneServerSocket = socketClient(
     { transports: ["websocket"] }
 );
 
-const lobbies = new Map();
+const lobbies = new Map<string, any>();
 
 // ── Lobby helpers ────────────────────────────────────────────────────────────
 
@@ -53,7 +53,7 @@ function emitLobbyState(io, lobbyId, lobby) {
         status: lobby.status,
         timePerQuestion: lobby.timePerQuestion,
         timeMode: lobby.timeMode,
-        players: Array.from(lobby.players.values()),
+        players: Array.from<any>(lobby.players.values()),
         gameType: lobby.gameType ?? "quiz",
         unoOptions: lobby.unoOptions ?? { stackable: false, jumpIn: false, teamMode: "none", teamWinMode: "one" },
         tabooOptions: lobby.tabooOptions ?? { turnDuration: 60, totalRounds: 3, trapWordCount: 5, maxAttempts: 10, trapDuration: 60 },
@@ -74,7 +74,7 @@ function removePlayerAndMaybeTransferHost({ io, lobbyId, userId }) {
     lobby.players.delete(userId);
     if (lobby.teams) lobby.teams.delete(userId);
     if (lobby.players.size === 0) { lobbies.delete(lobbyId); broadcastLobbies(io); return; }
-    if (lobby.hostId === userId) lobby.hostId = Array.from(lobby.players.values())[0].userId;
+    if (lobby.hostId === userId) lobby.hostId = (Array.from<any>(lobby.players.values())[0] as any).userId;
     emitLobbyState(io, lobbyId, lobby);
     broadcastLobbies(io);
 }
@@ -84,14 +84,14 @@ function broadcastLobbies(io) {
         .filter(([, lobby]) => lobby.isPublic !== false)
         .map(([id, lobby]) => ({
             id,
-            title: lobby.title ?? `Lobby de ${Array.from(lobby.players.values())[0]?.username ?? "?"}`,
+            title: lobby.title ?? `Lobby de ${Array.from<any>(lobby.players.values())[0]?.username ?? "?"}`,
             description: lobby.description ?? "",
             gameType: lobby.gameType ?? "quiz",
             maxPlayers: lobby.maxPlayers ?? 8,
             currentPlayers: lobby.players.size,
             status: lobby.status === "WAITING" ? "waiting" : "in-progress",
-            host: Array.from(lobby.players.values()).find(p => p.userId === lobby.hostId)?.username ?? "?",
-            playerNames: Array.from(lobby.players.values()).map(p => p.username),
+            host: Array.from<any>(lobby.players.values()).find(p => p.userId === lobby.hostId)?.username ?? "?",
+            playerNames: Array.from<any>(lobby.players.values()).map(p => p.username),
         }));
     io.emit("lobbies", lobbyList);
 }
@@ -410,18 +410,18 @@ io.on("connection", (socket) => {
             });
             io.to(`lobby:${lobbyId}`).emit("game:start", { gameType: "taboo", lobbyId });
         } else if (gameType === "skyjow") {
-            const players = Array.from(lobby.players.values());
+            const players = Array.from<any>(lobby.players.values());
             const opts = lobby.skyjowOptions ?? { eliminateRows: false };
             skyjowServerSocket.emit("skyjow:configure", { lobbyId, players, options: opts });
             io.to(`lobby:${lobbyId}`).emit("game:start", { gameType: "skyjow", lobbyId });
         } else if (gameType === "yahtzee") {
-            const players = Array.from(lobby.players.values());
+            const players = Array.from<any>(lobby.players.values());
             yahtzeeServerSocket.emit("yahtzee:init", { lobbyId, players });
             io.to(`lobby:${lobbyId}`).emit("game:start", { gameType: "yahtzee", lobbyId });
         } else if (gameType === "puissance4") {
             io.to(`lobby:${lobbyId}`).emit("game:start", { gameType: "puissance4", lobbyId });
         } else if (gameType === "just-one") {
-            const players = Array.from(lobby.players.values()); // [{ userId, username }]
+            const players = Array.from<any>(lobby.players.values()); // [{ userId, username }]
             justOneServerSocket.emit("just-one:configure", { lobbyId, players });
             io.to(`lobby:${lobbyId}`).emit("game:start", { gameType: "just-one", lobbyId });
         } else if (gameType === "battleship") {
@@ -446,14 +446,14 @@ io.on("connection", (socket) => {
             .filter(([, lobby]) => lobby.isPublic !== false)
             .map(([id, lobby]) => ({
                 id,
-                title: lobby.title ?? `Lobby de ${Array.from(lobby.players.values())[0]?.username ?? "?"}`,
+                title: lobby.title ?? `Lobby de ${Array.from<any>(lobby.players.values())[0]?.username ?? "?"}`,
                 description: lobby.description ?? "",
                 gameType: lobby.gameType ?? "quiz",
                 maxPlayers: lobby.maxPlayers ?? 8,
                 currentPlayers: lobby.players.size,
                 status: lobby.status === "WAITING" ? "waiting" : "in-progress",
-                host: Array.from(lobby.players.values()).find(p => p.userId === lobby.hostId)?.username ?? "?",
-                playerNames: Array.from(lobby.players.values()).map(p => p.username),
+                host: Array.from<any>(lobby.players.values()).find(p => p.userId === lobby.hostId)?.username ?? "?",
+                playerNames: Array.from<any>(lobby.players.values()).map(p => p.username),
             }));
         socket.emit("lobbies", lobbyList);
     });
@@ -467,4 +467,4 @@ io.on("connection", (socket) => {
 });
 
 const PORT = process.env.PORT || 10000;
-server.listen(PORT, () => console.log("lobby-server listening on", PORT));
+server.listen(PORT, () => console.log("[LOBBY] realtime listening on", PORT));
