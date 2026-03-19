@@ -43,7 +43,7 @@ const justOneServerSocket = socketClient(
 );
 
 const diamantServerSocket = socketClient(
-    process.env.DIAMANT_SERVER_URL ?? "http://localhost:10008",
+    process.env.DIAMANT_SERVER_URL ?? "http://localhost:10009",
     { transports: ["websocket"] }
 );
 
@@ -261,24 +261,20 @@ io.on("connection", (socket) => {
         broadcastLobbies(io);
     });
 
-    socket.on("lobby:setTimeMode", ({ timeMode }) => {
+    socket.on("lobby:setQuizOptions", ({ timeMode, timePerQuestion }) => {
         const { lobbyId, userId } = socket.data || {};
         if (!lobbyId || !userId) return;
         const lobby = lobbies.get(lobbyId);
         if (!lobby || lobby.hostId !== userId) return;
-        if (!["per_question", "total", "none"].includes(timeMode)) return;
-        lobby.timeMode = timeMode;
-        emitLobbyState(io, lobbyId, lobby);
-    });
-
-    socket.on("lobby:setTimePerQuestion", ({ timePerQuestion }) => {
-        const { lobbyId, userId } = socket.data || {};
-        if (!lobbyId || !userId) return;
-        const lobby = lobbies.get(lobbyId);
-        if (!lobby || lobby.hostId !== userId) return;
-        const t = Number(timePerQuestion);
-        if (!Number.isFinite(t) || t < 5 || t > 3600) return;
-        lobby.timePerQuestion = t;
+        if (timeMode !== undefined) {
+            if (!["per_question", "total", "none"].includes(timeMode)) return;
+            lobby.timeMode = timeMode;
+        }
+        if (timePerQuestion !== undefined) {
+            const t = Number(timePerQuestion);
+            if (!Number.isFinite(t) || t < 5 || t > 3600) return;
+            lobby.timePerQuestion = t;
+        }
         emitLobbyState(io, lobbyId, lobby);
     });
 
@@ -424,7 +420,7 @@ io.on("connection", (socket) => {
             io.to(`lobby:${lobbyId}`).emit("game:start", { gameType: "skyjow", lobbyId });
         } else if (gameType === "yahtzee") {
             const players = Array.from<any>(lobby.players.values());
-            yahtzeeServerSocket.emit("yahtzee:init", { lobbyId, players });
+            yahtzeeServerSocket.emit("yahtzee:configure", { lobbyId, players });
             io.to(`lobby:${lobbyId}`).emit("game:start", { gameType: "yahtzee", lobbyId });
         } else if (gameType === "puissance4") {
             io.to(`lobby:${lobbyId}`).emit("game:start", { gameType: "puissance4", lobbyId });
