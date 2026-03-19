@@ -42,11 +42,16 @@ const justOneServerSocket = socketClient(
     { transports: ["websocket"] }
 );
 
+const diamantServerSocket = socketClient(
+    process.env.DIAMANT_SERVER_URL ?? "http://localhost:10008",
+    { transports: ["websocket"] }
+);
+
 const lobbies = new Map<string, any>();
 
 // ── Lobby helpers ────────────────────────────────────────────────────────────
 
-function emitLobbyState(io, lobbyId, lobby) {
+function emitLobbyState(io: Server, lobbyId: string, lobby: any) {
     io.to(`lobby:${lobbyId}`).emit("lobby:state", {
         hostId: lobby.hostId,
         quizId: lobby.quizId,
@@ -67,7 +72,7 @@ function emitLobbyState(io, lobbyId, lobby) {
     });
 }
 
-function removePlayerAndMaybeTransferHost({ io, lobbyId, userId }) {
+function removePlayerAndMaybeTransferHost({ io, lobbyId, userId }: { io: Server; lobbyId: string; userId: string }) {
     const lobby = lobbies.get(lobbyId);
     if (!lobby) return;
     if (lobby.resultViewers?.has(userId)) { lobby.resultViewers.delete(userId); return; }
@@ -79,7 +84,7 @@ function removePlayerAndMaybeTransferHost({ io, lobbyId, userId }) {
     broadcastLobbies(io);
 }
 
-function broadcastLobbies(io) {
+function broadcastLobbies(io: Server) {
     const lobbyList = Array.from(lobbies.entries())
         .filter(([, lobby]) => lobby.isPublic !== false)
         .map(([id, lobby]) => ({
@@ -126,10 +131,12 @@ io.on("connection", (socket) => {
                 description: description ?? "",
                 maxPlayers: (Number.isFinite(Number(maxPlayers)) && Number(maxPlayers) >= 2) ? Number(maxPlayers) : defaultMaxPlayers,
                 gameType: gameType ?? "quiz",
+                // Options par défaut pour les jeux
                 unoOptions: { stackable: false, jumpIn: false, teamMode: "none", teamWinMode: "one" },
                 tabooOptions: { turnDuration: 60, totalRounds: 3, trapWordCount: 5, maxAttempts: 10, trapDuration: 60 },
                 skyjowOptions: { eliminateRows: false },
                 battleshipOptions: { gridSize: 10, ships: [5, 4, 3, 3, 2] },
+                diamantOptions: { roundCount: 5 },
                 orators: { "0": null, "1": null }
             };
         }
@@ -289,11 +296,12 @@ io.on("connection", (socket) => {
         if (!lobbyId || !userId) return;
         const lobby = lobbies.get(lobbyId);
         if (!lobby || lobby.hostId !== userId) return;
-        if (!["quiz", "uno", "taboo", "skyjow", "yahtzee", "puissance4", "just-one", "battleship"].includes(gameType)) return;
+        if (!["quiz", "uno", "taboo", "skyjow", "yahtzee", "puissance4", "just-one", "battleship", "diamant"].includes(gameType)) return;
         lobby.gameType = gameType;
         if (gameType !== "quiz") lobby.quizId = null;
         if (gameType === "puissance4") lobby.maxPlayers = 2;
         if (gameType === "battleship") lobby.maxPlayers = 2;
+        if (gameType === "diamant") lobby.maxPlayers = 8;
         if (gameType === "uno" && lobby.unoOptions?.teamMode === "2v2") lobby.maxPlayers = 4;
         if (gameType === "just-one") lobby.maxPlayers = 7;
         emitLobbyState(io, lobbyId, lobby);
@@ -426,6 +434,14 @@ io.on("connection", (socket) => {
             io.to(`lobby:${lobbyId}`).emit("game:start", { gameType: "just-one", lobbyId });
         } else if (gameType === "battleship") {
             io.to(`lobby:${lobbyId}`).emit("game:start", { gameType: "battleship", lobbyId });
+        } else if (gameType === "diamant") {
+            const players = Array.from(lobby.players.values());
+            diamantServerSocket.emit("diamant:configure", {
+                lobbyId,
+                players,
+                options: lobby.diamantOptions ?? { roundCount: 5 },
+            });
+            io.to(`lobby:${lobbyId}`).emit("game:start", { gameType: "diamant", lobbyId });
         } else {
             io.to(`lobby:${lobbyId}`).emit("game:start", { gameType: "quiz", quizId: lobby.quizId, timeMode: lobby.timeMode, timePerQuestion: lobby.timePerQuestion });
         }
