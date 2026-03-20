@@ -1,3 +1,4 @@
+import 'dotenv/config';
 // lobby-server/src/index.ts
 import express from "express";
 import http from "http";
@@ -47,6 +48,16 @@ const diamantServerSocket = socketClient(
     { transports: ["websocket"] }
 );
 
+const impostorServerSocket = socketClient(
+    process.env.IMPOSTOR_SERVER_URL ?? "http://localhost:10010",
+    { transports: ["websocket"] }
+);
+
+const quizServerSocket = socketClient(
+    process.env.QUIZ_SERVER_URL ?? "http://localhost:10002",
+    { transports: ["websocket"] }
+);
+
 const lobbies = new Map<string, any>();
 
 // ── Lobby helpers ────────────────────────────────────────────────────────────
@@ -65,6 +76,7 @@ function emitLobbyState(io: Server, lobbyId: string, lobby: any) {
         teams: lobby.teams ? Object.fromEntries(lobby.teams) : null,
         orators: lobby.orators ?? { "0": null, "1": null },
         skyjowOptions: lobby.skyjowOptions ?? { eliminateRows: false },
+        impostorOptions: lobby.impostorOptions ?? { rounds: 1 },
         title: lobby.title ?? null,
         description: lobby.description ?? null,
         maxPlayers: lobby.maxPlayers ?? 8,
@@ -137,6 +149,7 @@ io.on("connection", (socket) => {
                 skyjowOptions: { eliminateRows: false },
                 battleshipOptions: { gridSize: 10, ships: [5, 4, 3, 3, 2] },
                 diamantOptions: { roundCount: 5 },
+                impostorOptions: { rounds: 1, timePerRound: 60 },
                 orators: { "0": null, "1": null }
             };
         }
@@ -163,6 +176,7 @@ io.on("connection", (socket) => {
         lobby.tabooOptions ||= { turnDuration: 60, totalRounds: 3, trapWordCount: 5, maxAttempts: 10, trapDuration: 60 };
         lobby.skyjowOptions ||= { eliminateRows: false };
         lobby.battleshipOptions ||= { gridSize: 10, ships: [5, 4, 3, 3, 2] };
+        lobby.impostorOptions ||= { rounds: 1, timePerRound: 60 };
 
         // Sauvegarde et émission
         lobbies.set(lobbyId, lobby);
@@ -292,12 +306,13 @@ io.on("connection", (socket) => {
         if (!lobbyId || !userId) return;
         const lobby = lobbies.get(lobbyId);
         if (!lobby || lobby.hostId !== userId) return;
-        if (!["quiz", "uno", "taboo", "skyjow", "yahtzee", "puissance4", "just-one", "battleship", "diamant"].includes(gameType)) return;
+        if (!["quiz", "uno", "taboo", "skyjow", "yahtzee", "puissance4", "just-one", "battleship", "diamant", "impostor"].includes(gameType)) return;
         lobby.gameType = gameType;
         if (gameType !== "quiz") lobby.quizId = null;
         if (gameType === "puissance4") lobby.maxPlayers = 2;
         if (gameType === "battleship") lobby.maxPlayers = 2;
         if (gameType === "diamant") lobby.maxPlayers = 8;
+        if (gameType === "impostor") lobby.maxPlayers = 8;
         if (gameType === "uno" && lobby.unoOptions?.teamMode === "2v2") lobby.maxPlayers = 4;
         if (gameType === "just-one") lobby.maxPlayers = 7;
         emitLobbyState(io, lobbyId, lobby);
@@ -438,8 +453,21 @@ io.on("connection", (socket) => {
                 options: lobby.diamantOptions ?? { roundCount: 5 },
             });
             io.to(`lobby:${lobbyId}`).emit("game:start", { gameType: "diamant", lobbyId });
+        } else if (gameType === "impostor") {
+            const players = Array.from<any>(lobby.players.values());
+            impostorServerSocket.emit("impostor:configure", { lobbyId, players, expectedCount: lobby.players.size, options: lobby.impostorOptions ?? { rounds: 1 } });
+            io.to(`lobby:${lobbyId}`).emit("game:start", { gameType: "impostor", lobbyId });
         } else {
-            io.to(`lobby:${lobbyId}`).emit("game:start", { gameType: "quiz", quizId: lobby.quizId, timeMode: lobby.timeMode, timePerQuestion: lobby.timePerQuestion });
+            const players = Array.from<any>(lobby.players.values());
+            quizServerSocket.emit("quiz:configure", {
+                lobbyId,
+                quizId: lobby.quizId,
+                players,
+                expectedCount: lobby.players.size,
+                timeMode: lobby.timeMode,
+                timePerQuestion: lobby.timePerQuestion,
+            });
+            io.to(`lobby:${lobbyId}`).emit("game:start", { gameType: "quiz", quizId: lobby.quizId });
         }
     });
 
@@ -450,6 +478,19 @@ io.on("connection", (socket) => {
         if (!lobby || lobby.hostId !== userId) return;
         if (!lobby.skyjowOptions) lobby.skyjowOptions = { eliminateRows: false };
         if (typeof eliminateRows === "boolean") lobby.skyjowOptions.eliminateRows = eliminateRows;
+        emitLobbyState(io, lobbyId, lobby);
+    });
+
+    socket.on("lobby:setImpostorOptions", ({ rounds, timePerRound }) => {
+        const { lobbyId, userId } = socket.data || {};
+        if (!lobbyId || !userId) return;
+        const lobby = lobbies.get(lobbyId);
+        if (!lobby || lobby.hostId !== userId) return;
+        if (!lobby.impostorOptions) lobby.impostorOptions = { rounds: 1, timePerRound: 60 };
+        const r = Number(rounds);
+        if (Number.isFinite(r) && r >= 1 && r <= 5) lobby.impostorOptions.rounds = r;
+        const t = Number(timePerRound);
+        if (Number.isFinite(t) && t >= 30 && t <= 120) lobby.impostorOptions.timePerRound = t;
         emitLobbyState(io, lobbyId, lobby);
     });
 
