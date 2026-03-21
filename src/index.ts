@@ -328,6 +328,28 @@ io.on("connection", (socket) => {
         broadcastLobbies(io);
     });
 
+    socket.on("lobby:claimHost", async () => {
+        const { lobbyId, userId } = socket.data || {};
+        if (!lobbyId || !userId) return;
+        const lobby = lobbies.get(lobbyId);
+        if (!lobby || !lobby.players.has(userId)) return;
+        // Verify admin role via frontend API
+        const frontendUrl = process.env.FRONTEND_URL;
+        const secret = process.env.INTERNAL_API_KEY;
+        if (!frontendUrl || !secret) return;
+        try {
+            const res = await fetch(`${frontendUrl}/api/user/role?userId=${userId}`, {
+                headers: { Authorization: `Bearer ${secret}` },
+            });
+            if (!res.ok) return;
+            const { role } = await res.json() as { role: string };
+            if (role !== 'ADMIN') return;
+        } catch { return; }
+        lobby.hostId = userId;
+        emitLobbyState(io, lobbyId, lobby);
+        broadcastLobbies(io);
+    });
+
     socket.on("lobby:setQuizOptions", ({ timeMode, timePerQuestion }) => {
         const { lobbyId, userId } = socket.data || {};
         if (!lobbyId || !userId) return;
