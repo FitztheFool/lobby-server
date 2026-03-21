@@ -306,7 +306,7 @@ io.on("connection", (socket) => {
         if (!lobbyId || !userId) return;
         const lobby = lobbies.get(lobbyId);
         if (!lobby || lobby.hostId !== userId) return;
-        if (!["quiz", "uno", "taboo", "skyjow", "yahtzee", "puissance4", "just-one", "battleship", "diamant", "impostor"].includes(gameType)) return;
+        if (!["quiz", "uno", "taboo", "skyjow", "yahtzee", "puissance4", "just_one", "battleship", "diamant", "impostor"].includes(gameType)) return;
         lobby.gameType = gameType;
         if (gameType !== "quiz") lobby.quizId = null;
         if (gameType === "puissance4") lobby.maxPlayers = 2;
@@ -314,7 +314,7 @@ io.on("connection", (socket) => {
         if (gameType === "diamant") lobby.maxPlayers = 8;
         if (gameType === "impostor") lobby.maxPlayers = 8;
         if (gameType === "uno" && lobby.unoOptions?.teamMode === "2v2") lobby.maxPlayers = 4;
-        if (gameType === "just-one") lobby.maxPlayers = 7;
+        if (gameType === "just_one") lobby.maxPlayers = 7;
         emitLobbyState(io, lobbyId, lobby);
         broadcastLobbies(io);
     });
@@ -439,10 +439,10 @@ io.on("connection", (socket) => {
             io.to(`lobby:${lobbyId}`).emit("game:start", { gameType: "yahtzee", lobbyId });
         } else if (gameType === "puissance4") {
             io.to(`lobby:${lobbyId}`).emit("game:start", { gameType: "puissance4", lobbyId });
-        } else if (gameType === "just-one") {
+        } else if (gameType === "just_one") {
             const players = Array.from<any>(lobby.players.values()); // [{ userId, username }]
-            justOneServerSocket.emit("just-one:configure", { lobbyId, players });
-            io.to(`lobby:${lobbyId}`).emit("game:start", { gameType: "just-one", lobbyId });
+            justOneServerSocket.emit("just_one:configure", { lobbyId, players });
+            io.to(`lobby:${lobbyId}`).emit("game:start", { gameType: "just_one", lobbyId });
         } else if (gameType === "battleship") {
             io.to(`lobby:${lobbyId}`).emit("game:start", { gameType: "battleship", lobbyId });
         } else if (gameType === "diamant") {
