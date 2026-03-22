@@ -1,5 +1,5 @@
-import 'dotenv/config';
 // lobby-server/src/index.ts
+import 'dotenv/config';
 import express from "express";
 import http from "http";
 import { Server } from "socket.io";
