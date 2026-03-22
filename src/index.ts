@@ -195,7 +195,7 @@ io.on("connection", (socket) => {
                 title: title ?? null,
                 description: description ?? "",
                 maxPlayers: (Number.isFinite(Number(maxPlayers)) && Number(maxPlayers) >= 2) ? Number(maxPlayers) : defaultMaxPlayers,
-                gameType: gameType ?? "quiz",
+                gameType: gameType ?? "uno",
                 // Options par défaut pour les jeux
                 unoOptions: { stackable: false, jumpIn: false, teamMode: "none", teamWinMode: "one" },
                 tabooOptions: { turnDuration: 60, totalRounds: 3, trapWordCount: 5, maxAttempts: 10, trapDuration: 60 },
@@ -384,6 +384,7 @@ io.on("connection", (socket) => {
         if (!["quiz", "uno", "taboo", "skyjow", "yahtzee", "puissance4", "just_one", "battleship", "diamant", "impostor"].includes(gameType)) return;
         lobby.gameType = gameType;
         if (gameType !== "quiz") lobby.quizId = null;
+        if (gameType === "quiz") lobby.maxPlayers = 30;
         if (gameType === "puissance4") lobby.maxPlayers = 2;
         if (gameType === "battleship") lobby.maxPlayers = 2;
         if (gameType === "diamant") lobby.maxPlayers = 8;
