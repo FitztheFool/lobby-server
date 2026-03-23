@@ -58,6 +58,16 @@ const quizServerSocket = socketClient(
     { transports: ["websocket"] }
 );
 
+const battleshipServerSocket = socketClient(
+    process.env.BATTLESHIP_SERVER_URL ?? "http://localhost:10008",
+    { transports: ["websocket"] }
+);
+
+const puissance4ServerSocket = socketClient(
+    process.env.PUISSANCE4_SERVER_URL ?? "http://localhost:10006",
+    { transports: ["websocket"] }
+);
+
 const lobbies = new Map<string, any>();
 
 // ── Reconnect handlers: resend configure when a game server restarts ──────────
@@ -88,6 +98,12 @@ function sendImpostorConfigure(lobbyId: string, lobby: any) {
 function sendQuizConfigure(lobbyId: string, lobby: any) {
     quizServerSocket.emit("quiz:configure", { lobbyId, quizId: lobby.quizId, players: Array.from(lobby.players.values()), expectedCount: lobby.players.size, timeMode: lobby.timeMode, timePerQuestion: lobby.timePerQuestion });
 }
+function sendBattleshipConfigure(lobbyId: string, lobby: any) {
+    battleshipServerSocket.emit("battleship:configure", { lobbyId, options: lobby.battleshipOptions ?? {} });
+}
+function sendPuissance4Configure(lobbyId: string) {
+    puissance4ServerSocket.emit("p4:configure", { lobbyId });
+}
 
 const reconnectHandlers: [any, string, (id: string, l: any) => void][] = [
     [tabooServerSocket, "taboo", sendTabooConfigure],
@@ -98,6 +114,8 @@ const reconnectHandlers: [any, string, (id: string, l: any) => void][] = [
     [diamantServerSocket, "diamant", sendDiamantConfigure],
     [impostorServerSocket, "impostor", sendImpostorConfigure],
     [quizServerSocket, "quiz", sendQuizConfigure],
+    [battleshipServerSocket, "battleship", sendBattleshipConfigure],
+    [puissance4ServerSocket, "puissance4", sendPuissance4Configure],
 ];
 
 for (const [sock, gameType, sendConfigure] of reconnectHandlers) {
@@ -235,6 +253,7 @@ io.on("connection", (socket) => {
         lobbies.set(lobbyId, lobby);
         emitLobbyState(io, lobbyId, lobby);
         broadcastLobbies(io);
+
     });
 
     socket.on('chat:send', ({ text, team }) => {
@@ -490,7 +509,10 @@ io.on("connection", (socket) => {
         }
         lobby.status = "PLAYING";
         emitLobbyState(io, lobbyId, lobby);
-        const startGame = (payload: any) => io.to(`lobby:${lobbyId}`).emit("game:start", payload);
+        const startGame = (payload: any) => {
+            lobby.gameStartPayload = payload;
+            io.to(`lobby:${lobbyId}`).emit("game:start", payload);
+        };
         if (gameType === "uno") {
             const opts = lobby.unoOptions ?? { stackable: false, jumpIn: false, teamMode: "none", teamWinMode: "one" };
             unoServerSocket.emit("uno:configure", { lobbyId, options: opts, expectedCount: lobby.players.size, preAssignedTeams: lobby.teams ? Object.fromEntries(lobby.teams) : null }, () => startGame({ gameType: "uno", lobbyId }));
@@ -505,12 +527,12 @@ io.on("connection", (socket) => {
             const players = Array.from<any>(lobby.players.values());
             yahtzeeServerSocket.emit("yahtzee:configure", { lobbyId, players }, () => startGame({ gameType: "yahtzee", lobbyId }));
         } else if (gameType === "puissance4") {
-            startGame({ gameType: "puissance4", lobbyId });
+            puissance4ServerSocket.emit("p4:configure", { lobbyId }, () => startGame({ gameType: "puissance4", lobbyId }));
         } else if (gameType === "just_one") {
             const players = Array.from<any>(lobby.players.values());
             justOneServerSocket.emit("just_one:configure", { lobbyId, players }, () => startGame({ gameType: "just_one", lobbyId }));
         } else if (gameType === "battleship") {
-            startGame({ gameType: "battleship", lobbyId });
+            battleshipServerSocket.emit("battleship:configure", { lobbyId, options: lobby.battleshipOptions ?? {} }, () => startGame({ gameType: "battleship", lobbyId }));
         } else if (gameType === "diamant") {
             const players = Array.from(lobby.players.values());
             diamantServerSocket.emit("diamant:configure", { lobbyId, players, options: lobby.diamantOptions ?? { roundCount: 5 } }, () => startGame({ gameType: "diamant", lobbyId }));
