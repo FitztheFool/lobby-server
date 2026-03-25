@@ -491,9 +491,15 @@ io.on("connection", (socket) => {
         if (!lobby || lobby.hostId !== userId) return;
         const gameType = lobby.gameType ?? "quiz";
         if (gameType === "quiz" && !lobby.quizId) return;
+        if (gameType === "quiz" && lobby.players.size < 2) return;
+        if (gameType === "uno" && lobby.players.size < 2) return;
         if (gameType === "skyjow" && (lobby.players.size < 2 || lobby.players.size > 8)) return;
         if (gameType === "puissance4" && lobby.players.size !== 2) return;
+        if (gameType === "battleship" && lobby.players.size !== 2) return;
         if (gameType === "yahtzee" && (lobby.players.size < 2 || lobby.players.size > 8)) return;
+        if (gameType === "just_one" && lobby.players.size < 3) return;
+        if (gameType === "diamant" && lobby.players.size < 2) return;
+        if (gameType === "impostor" && lobby.players.size < 4) return;
         if (gameType === "taboo") {
             if (!lobby.teams || lobby.teams.size < 4) return;
             const t0 = Array.from(lobby.teams.values()).filter(t => t === 0).length;
