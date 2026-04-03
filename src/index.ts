@@ -1,5 +1,7 @@
 // lobby-server/src/index.ts
 import 'dotenv/config';
+import { randomUUID } from "crypto";
+import { jwtVerify } from 'jose';
 import express from "express";
 import http from "http";
 import { Server } from "socket.io";
@@ -152,6 +154,7 @@ function emitLobbyState(io: Server, lobbyId: string, lobby: any) {
         description: lobby.description ?? null,
         maxPlayers: lobby.maxPlayers ?? 8,
         isPublic: lobby.isPublic ?? false,
+        gameId: lobby.gameStartPayload?.gameId ?? null,
     });
 }
 
@@ -186,13 +189,29 @@ function broadcastLobbies(io: Server) {
 
 // ── Socket connections ───────────────────────────────────────────────────────
 
+const SOCKET_SECRET = new TextEncoder().encode(process.env.INTERNAL_API_KEY!);
+
+io.use(async (socket, next) => {
+    const token = socket.handshake.auth?.token as string | undefined;
+    if (!token) return next(new Error('auth_required'));
+    try {
+        const { payload } = await jwtVerify(token, SOCKET_SECRET);
+        socket.data.userId = payload.sub as string;
+        socket.data.username = payload.username as string;
+        next();
+    } catch {
+        next(new Error('invalid_token'));
+    }
+});
+
 io.on("connection", (socket) => {
     console.log("nouvelle connexion lobby", socket.id);
 
-    socket.on("lobby:join", ({ lobbyId, userId, username, title, description, maxPlayers, isPublic, gameType }) => {
+    socket.on("lobby:join", ({ lobbyId, title, description, maxPlayers, isPublic, gameType }) => {
+        const { userId, username } = socket.data;
         if (!lobbyId || !userId || !username) return;
 
-        socket.data = { lobbyId, userId, username };
+        socket.data.lobbyId = lobbyId;
         socket.join(`lobby:${lobbyId}`);
 
         // Récupération ou création du lobby
@@ -515,9 +534,11 @@ io.on("connection", (socket) => {
         }
         lobby.status = "PLAYING";
         emitLobbyState(io, lobbyId, lobby);
+        const gameId = randomUUID();
         const startGame = (payload: any) => {
-            lobby.gameStartPayload = payload;
-            io.to(`lobby:${lobbyId}`).emit("game:start", payload);
+            const fullPayload = { ...payload, gameId };
+            lobby.gameStartPayload = fullPayload;
+            io.to(`lobby:${lobbyId}`).emit("game:start", fullPayload);
         };
         if (gameType === "uno") {
             const opts = lobby.unoOptions ?? { stackable: false, jumpIn: false, teamMode: "none", teamWinMode: "one" };
