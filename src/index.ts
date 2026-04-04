@@ -1,14 +1,14 @@
 // lobby-server/src/index.ts
 import 'dotenv/config';
 import { randomUUID } from "crypto";
-import { jwtVerify } from 'jose';
+import { jwtVerify, SignJWT } from 'jose';
 import express from "express";
 import http from "http";
 import { Server } from "socket.io";
 import { io as socketClient } from "socket.io-client";
 
 const app = express();
-app.get("/health", (req, res) => res.status(200).send("ok"));
+app.get("/health", (_req, res) => res.status(200).send("ok"));
 
 const server = http.createServer(app);
 
@@ -20,55 +20,35 @@ const io = new Server(server, {
     },
 });
 
-const unoServerSocket = socketClient(
-    process.env.UNO_SERVER_URL ?? "http://localhost:10001",
-    { transports: ["websocket"] }
-);
+// ── Bot spawning ──────────────────────────────────────────────────────────────
 
-const tabooServerSocket = socketClient(
-    process.env.TABOO_SERVER_URL ?? "http://localhost:10003",
-    { transports: ["websocket"] }
-);
+const BOT_SUPPORTED_GAMES = new Set(['puissance4', 'yahtzee']);
 
-const skyjowServerSocket = socketClient(
-    process.env.SKYJOW_SERVER_URL ?? "http://localhost:10004",
-    { transports: ["websocket"] }
-);
+async function makeServerToken(): Promise<string> {
+    return new SignJWT({ username: 'lobby-server' })
+        .setProtectedHeader({ alg: 'HS256' })
+        .setSubject('lobby-server')
+        .sign(SOCKET_SECRET);
+}
 
-const yahtzeeServerSocket = socketClient(
-    process.env.YAHTZEE_SERVER_URL ?? "http://localhost:10005",
-    { transports: ["websocket"] }
-);
+function serverAuth(cb: (data: object) => void) {
+    makeServerToken().then(token => cb({ token }));
+}
 
-const justOneServerSocket = socketClient(
-    process.env.JUST_ONE_SERVER_URL ?? "http://localhost:10007",
-    { transports: ["websocket"] }
-);
+function gameServerSocket(url: string) {
+    return socketClient(url, { transports: ["websocket"], auth: serverAuth });
+}
 
-const diamantServerSocket = socketClient(
-    process.env.DIAMANT_SERVER_URL ?? "http://localhost:10009",
-    { transports: ["websocket"] }
-);
-
-const impostorServerSocket = socketClient(
-    process.env.IMPOSTOR_SERVER_URL ?? "http://localhost:10010",
-    { transports: ["websocket"] }
-);
-
-const quizServerSocket = socketClient(
-    process.env.QUIZ_SERVER_URL ?? "http://localhost:10002",
-    { transports: ["websocket"] }
-);
-
-const battleshipServerSocket = socketClient(
-    process.env.BATTLESHIP_SERVER_URL ?? "http://localhost:10008",
-    { transports: ["websocket"] }
-);
-
-const puissance4ServerSocket = socketClient(
-    process.env.PUISSANCE4_SERVER_URL ?? "http://localhost:10006",
-    { transports: ["websocket"] }
-);
+const unoServerSocket = gameServerSocket(process.env.UNO_SERVER_URL ?? "http://localhost:10001");
+const tabooServerSocket = gameServerSocket(process.env.TABOO_SERVER_URL ?? "http://localhost:10003");
+const skyjowServerSocket = gameServerSocket(process.env.SKYJOW_SERVER_URL ?? "http://localhost:10004");
+const yahtzeeServerSocket = gameServerSocket(process.env.YAHTZEE_SERVER_URL ?? "http://localhost:10005");
+const justOneServerSocket = gameServerSocket(process.env.JUST_ONE_SERVER_URL ?? "http://localhost:10007");
+const diamantServerSocket = gameServerSocket(process.env.DIAMANT_SERVER_URL ?? "http://localhost:10009");
+const impostorServerSocket = gameServerSocket(process.env.IMPOSTOR_SERVER_URL ?? "http://localhost:10010");
+const quizServerSocket = gameServerSocket(process.env.QUIZ_SERVER_URL ?? "http://localhost:10002");
+const battleshipServerSocket = gameServerSocket(process.env.BATTLESHIP_SERVER_URL ?? "http://localhost:10008");
+const puissance4ServerSocket = gameServerSocket(process.env.PUISSANCE4_SERVER_URL ?? "http://localhost:10006");
 
 const lobbies = new Map<string, any>();
 
@@ -103,8 +83,9 @@ function sendQuizConfigure(lobbyId: string, lobby: any) {
 function sendBattleshipConfigure(lobbyId: string, lobby: any) {
     battleshipServerSocket.emit("battleship:configure", { lobbyId, options: lobby.battleshipOptions ?? {} });
 }
-function sendPuissance4Configure(lobbyId: string) {
-    puissance4ServerSocket.emit("p4:configure", { lobbyId });
+function sendPuissance4Configure(lobbyId: string, lobby: any) {
+    const botName = (lobby.bots ?? 0) > 0 ? '🤖 Bot 1' : undefined;
+    puissance4ServerSocket.emit("p4:configure", { lobbyId, botName });
 }
 
 const reconnectHandlers: [any, string, (id: string, l: any) => void][] = [
@@ -155,6 +136,7 @@ function emitLobbyState(io: Server, lobbyId: string, lobby: any) {
         maxPlayers: lobby.maxPlayers ?? 8,
         isPublic: lobby.isPublic ?? false,
         gameId: lobby.gameStartPayload?.gameId ?? null,
+        bots: lobby.bots ?? 0,
     });
 }
 
@@ -225,7 +207,7 @@ io.on("connection", (socket) => {
                 quizId: null,
                 status: "WAITING",
                 timePerQuestion: 15,
-                timeMode: "per_question",
+                timeMode: "none",
                 players: new Map(),
                 resultViewers: new Set(),
                 teams: null,
@@ -421,6 +403,7 @@ io.on("connection", (socket) => {
         if (!lobby || lobby.hostId !== userId) return;
         if (!["quiz", "uno", "taboo", "skyjow", "yahtzee", "puissance4", "just_one", "battleship", "diamant", "impostor"].includes(gameType)) return;
         lobby.gameType = gameType;
+        lobby.bots = 0; // reset bots when switching game
         if (gameType !== "quiz") lobby.quizId = null;
         if (gameType === "quiz") lobby.maxPlayers = 30;
         if (gameType === "puissance4") lobby.maxPlayers = 2;
@@ -431,6 +414,29 @@ io.on("connection", (socket) => {
         if (gameType === "just_one") lobby.maxPlayers = 7;
         emitLobbyState(io, lobbyId, lobby);
         broadcastLobbies(io);
+    });
+
+    socket.on("lobby:addBot", () => {
+        const { lobbyId, userId } = socket.data || {};
+        if (!lobbyId || !userId) return;
+        const lobby = lobbies.get(lobbyId);
+        if (!lobby || lobby.hostId !== userId) return;
+        if (!BOT_SUPPORTED_GAMES.has(lobby.gameType)) return;
+        const total = lobby.players.size + (lobby.bots ?? 0);
+        const max = lobby.maxPlayers ?? 2;
+        if (total >= max) return;
+        lobby.bots = (lobby.bots ?? 0) + 1;
+        emitLobbyState(io, lobbyId, lobby);
+    });
+
+    socket.on("lobby:removeBot", () => {
+        const { lobbyId, userId } = socket.data || {};
+        if (!lobbyId || !userId) return;
+        const lobby = lobbies.get(lobbyId);
+        if (!lobby || lobby.hostId !== userId) return;
+        if (!lobby.bots || lobby.bots <= 0) return;
+        lobby.bots -= 1;
+        emitLobbyState(io, lobbyId, lobby);
     });
 
     socket.on("lobby:setUnoOptions", ({ stackable, jumpIn, teamMode, teamWinMode }) => {
@@ -510,12 +516,15 @@ io.on("connection", (socket) => {
         if (!lobby || lobby.hostId !== userId) return;
         const gameType = lobby.gameType ?? "quiz";
         if (gameType === "quiz" && !lobby.quizId) return;
-        if (gameType === "quiz" && lobby.players.size < 2) return;
+        if (gameType === "quiz" && lobby.players.size < 1) return;
         if (gameType === "uno" && lobby.players.size < 2) return;
         if (gameType === "skyjow" && (lobby.players.size < 2 || lobby.players.size > 8)) return;
-        if (gameType === "puissance4" && lobby.players.size !== 2) return;
+        if (gameType === "puissance4" && (lobby.players.size + (lobby.bots ?? 0)) < 2) return;
+        if (gameType === "puissance4" && (lobby.players.size + (lobby.bots ?? 0)) > 2) return;
         if (gameType === "battleship" && lobby.players.size !== 2) return;
-        if (gameType === "yahtzee" && (lobby.players.size < 2 || lobby.players.size > 8)) return;
+        if (gameType === "yahtzee" && lobby.players.size < 1) return;
+        if (gameType === "yahtzee" && (lobby.players.size + (lobby.bots ?? 0)) < 2) return;
+        if (gameType === "yahtzee" && (lobby.players.size + (lobby.bots ?? 0)) > 8) return;
         if (gameType === "just_one" && lobby.players.size < 3) return;
         if (gameType === "diamant" && lobby.players.size < 2) return;
         if (gameType === "impostor" && lobby.players.size < 4) return;
@@ -551,10 +560,21 @@ io.on("connection", (socket) => {
             const opts = lobby.skyjowOptions ?? { eliminateRows: false };
             skyjowServerSocket.emit("skyjow:configure", { lobbyId, players, options: opts }, () => startGame({ gameType: "skyjow", lobbyId }));
         } else if (gameType === "yahtzee") {
-            const players = Array.from<any>(lobby.players.values());
-            yahtzeeServerSocket.emit("yahtzee:configure", { lobbyId, players }, () => startGame({ gameType: "yahtzee", lobbyId }));
+            const humanPlayers = Array.from<any>(lobby.players.values());
+            const botsToSpawn = lobby.bots ?? 0;
+            const botPlayers = Array.from({ length: botsToSpawn }, (_, i) => ({
+                userId: `bot-yahtzee-${randomUUID()}`,
+                username: botsToSpawn === 1 ? '🤖 Ordinateur' : `🤖 Bot ${i + 1}`,
+            }));
+            yahtzeeServerSocket.emit("yahtzee:configure", { lobbyId, players: [...humanPlayers, ...botPlayers] }, () => {
+                startGame({ gameType: "yahtzee", lobbyId });
+            });
         } else if (gameType === "puissance4") {
-            puissance4ServerSocket.emit("p4:configure", { lobbyId }, () => startGame({ gameType: "puissance4", lobbyId }));
+            const botsToSpawn = lobby.bots ?? 0;
+            const botName = botsToSpawn > 0 ? '🤖 Ordinateur' : undefined;
+            puissance4ServerSocket.emit("p4:configure", { lobbyId, botName }, () => {
+                startGame({ gameType: "puissance4", lobbyId });
+            });
         } else if (gameType === "just_one") {
             const players = Array.from<any>(lobby.players.values());
             justOneServerSocket.emit("just_one:configure", { lobbyId, players }, () => startGame({ gameType: "just_one", lobbyId }));
