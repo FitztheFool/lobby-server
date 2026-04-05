@@ -22,7 +22,7 @@ const io = new Server(server, {
 
 // ── Bot spawning ──────────────────────────────────────────────────────────────
 
-const BOT_SUPPORTED_GAMES = new Set(['puissance4', 'yahtzee']);
+const BOT_SUPPORTED_GAMES = new Set(['puissance4', 'yahtzee', 'diamant', 'battleship', 'uno']);
 
 async function makeServerToken(): Promise<string> {
     return new SignJWT({ username: 'lobby-server' })
@@ -60,7 +60,7 @@ function sendTabooConfigure(lobbyId: string, lobby: any) {
 }
 function sendUnoConfigure(lobbyId: string, lobby: any) {
     const opts = lobby.unoOptions ?? { stackable: false, jumpIn: false, teamMode: "none", teamWinMode: "one" };
-    unoServerSocket.emit("uno:configure", { lobbyId, options: opts, expectedCount: lobby.players.size, preAssignedTeams: lobby.teams ? Object.fromEntries(lobby.teams) : null });
+    unoServerSocket.emit("uno:configure", { lobbyId, options: opts, expectedCount: lobby.players.size, preAssignedTeams: lobby.teams ? Object.fromEntries(lobby.teams) : null, botCount: lobby.bots ?? 0 });
 }
 function sendSkyjowConfigure(lobbyId: string, lobby: any) {
     skyjowServerSocket.emit("skyjow:configure", { lobbyId, players: Array.from(lobby.players.values()), options: lobby.skyjowOptions ?? { eliminateRows: false } });
@@ -81,7 +81,8 @@ function sendQuizConfigure(lobbyId: string, lobby: any) {
     quizServerSocket.emit("quiz:configure", { lobbyId, quizId: lobby.quizId, players: Array.from(lobby.players.values()), expectedCount: lobby.players.size, timeMode: lobby.timeMode, timePerQuestion: lobby.timePerQuestion });
 }
 function sendBattleshipConfigure(lobbyId: string, lobby: any) {
-    battleshipServerSocket.emit("battleship:configure", { lobbyId, options: lobby.battleshipOptions ?? {} });
+    const botName = (lobby.bots ?? 0) > 0 ? '🤖 Bot 1' : undefined;
+    battleshipServerSocket.emit("battleship:configure", { lobbyId, options: lobby.battleshipOptions ?? {}, botName });
 }
 function sendPuissance4Configure(lobbyId: string, lobby: any) {
     const botName = (lobby.bots ?? 0) > 0 ? '🤖 Bot 1' : undefined;
@@ -517,16 +518,19 @@ io.on("connection", (socket) => {
         const gameType = lobby.gameType ?? "quiz";
         if (gameType === "quiz" && !lobby.quizId) return;
         if (gameType === "quiz" && lobby.players.size < 1) return;
-        if (gameType === "uno" && lobby.players.size < 2) return;
+        if (gameType === "uno" && (lobby.players.size + (lobby.bots ?? 0)) < 2) return;
         if (gameType === "skyjow" && (lobby.players.size < 2 || lobby.players.size > 8)) return;
         if (gameType === "puissance4" && (lobby.players.size + (lobby.bots ?? 0)) < 2) return;
         if (gameType === "puissance4" && (lobby.players.size + (lobby.bots ?? 0)) > 2) return;
-        if (gameType === "battleship" && lobby.players.size !== 2) return;
+        if (gameType === "battleship" && (lobby.players.size + (lobby.bots ?? 0)) < 2) return;
+        if (gameType === "battleship" && (lobby.players.size + (lobby.bots ?? 0)) > 2) return;
         if (gameType === "yahtzee" && lobby.players.size < 1) return;
         if (gameType === "yahtzee" && (lobby.players.size + (lobby.bots ?? 0)) < 2) return;
         if (gameType === "yahtzee" && (lobby.players.size + (lobby.bots ?? 0)) > 8) return;
         if (gameType === "just_one" && lobby.players.size < 3) return;
-        if (gameType === "diamant" && lobby.players.size < 2) return;
+        if (gameType === "diamant" && lobby.players.size < 1) return;
+        if (gameType === "diamant" && (lobby.players.size + (lobby.bots ?? 0)) < 2) return;
+        if (gameType === "diamant" && (lobby.players.size + (lobby.bots ?? 0)) > 8) return;
         if (gameType === "impostor" && lobby.players.size < 4) return;
         if (gameType === "taboo") {
             if (!lobby.teams || lobby.teams.size < 4) return;
@@ -551,7 +555,7 @@ io.on("connection", (socket) => {
         };
         if (gameType === "uno") {
             const opts = lobby.unoOptions ?? { stackable: false, jumpIn: false, teamMode: "none", teamWinMode: "one" };
-            unoServerSocket.emit("uno:configure", { lobbyId, options: opts, expectedCount: lobby.players.size, preAssignedTeams: lobby.teams ? Object.fromEntries(lobby.teams) : null }, () => startGame({ gameType: "uno", lobbyId }));
+            unoServerSocket.emit("uno:configure", { lobbyId, options: opts, expectedCount: lobby.players.size, preAssignedTeams: lobby.teams ? Object.fromEntries(lobby.teams) : null, botCount: lobby.bots ?? 0 }, () => startGame({ gameType: "uno", lobbyId }));
         } else if (gameType === "taboo") {
             const opts = lobby.tabooOptions ?? { turnDuration: 60, totalRounds: 3, trapWordCount: 5, maxAttempts: 10, trapDuration: 60 };
             tabooServerSocket.emit("taboo:configure", { lobbyId, options: opts, teams: lobby.teams ? Object.fromEntries(lobby.teams) : null, orators: lobby.orators ?? { "0": null, "1": null }, hostId: lobby.hostId }, () => startGame({ gameType: "taboo", lobbyId }));
@@ -564,14 +568,14 @@ io.on("connection", (socket) => {
             const botsToSpawn = lobby.bots ?? 0;
             const botPlayers = Array.from({ length: botsToSpawn }, (_, i) => ({
                 userId: `bot-yahtzee-${randomUUID()}`,
-                username: botsToSpawn === 1 ? '🤖 Ordinateur' : `🤖 Bot ${i + 1}`,
+                username: `🤖 Bot ${i + 1}`,
             }));
             yahtzeeServerSocket.emit("yahtzee:configure", { lobbyId, players: [...humanPlayers, ...botPlayers] }, () => {
                 startGame({ gameType: "yahtzee", lobbyId });
             });
         } else if (gameType === "puissance4") {
             const botsToSpawn = lobby.bots ?? 0;
-            const botName = botsToSpawn > 0 ? '🤖 Ordinateur' : undefined;
+            const botName = botsToSpawn > 0 ? '🤖 Bot 1' : undefined;
             puissance4ServerSocket.emit("p4:configure", { lobbyId, botName }, () => {
                 startGame({ gameType: "puissance4", lobbyId });
             });
@@ -579,10 +583,18 @@ io.on("connection", (socket) => {
             const players = Array.from<any>(lobby.players.values());
             justOneServerSocket.emit("just_one:configure", { lobbyId, players }, () => startGame({ gameType: "just_one", lobbyId }));
         } else if (gameType === "battleship") {
-            battleshipServerSocket.emit("battleship:configure", { lobbyId, options: lobby.battleshipOptions ?? {} }, () => startGame({ gameType: "battleship", lobbyId }));
+            const botsToSpawn = lobby.bots ?? 0;
+            const botName = botsToSpawn > 0 ? '🤖 Bot 1' : undefined;
+            battleshipServerSocket.emit("battleship:configure", { lobbyId, options: lobby.battleshipOptions ?? {}, botName }, () => startGame({ gameType: "battleship", lobbyId }));
         } else if (gameType === "diamant") {
-            const players = Array.from(lobby.players.values());
-            diamantServerSocket.emit("diamant:configure", { lobbyId, players, options: lobby.diamantOptions ?? { roundCount: 5 } }, () => startGame({ gameType: "diamant", lobbyId }));
+            const humanPlayers = Array.from(lobby.players.values());
+            const botsToSpawn = lobby.bots ?? 0;
+            const botPlayers = Array.from({ length: botsToSpawn }, (_, i) => ({
+                userId: `bot-diamant-${randomUUID()}`,
+                username: `🤖 Bot ${i + 1}`,
+            }));
+            const allPlayers = [...humanPlayers, ...botPlayers];
+            diamantServerSocket.emit("diamant:configure", { lobbyId, players: allPlayers, options: lobby.diamantOptions ?? { roundCount: 5 } }, () => startGame({ gameType: "diamant", lobbyId }));
         } else if (gameType === "impostor") {
             const players = Array.from<any>(lobby.players.values());
             impostorServerSocket.emit("impostor:configure", { lobbyId, players, expectedCount: lobby.players.size, options: lobby.impostorOptions ?? { rounds: 1 } }, () => startGame({ gameType: "impostor", lobbyId }));
