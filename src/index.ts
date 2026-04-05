@@ -22,7 +22,7 @@ const io = new Server(server, {
 
 // ── Bot spawning ──────────────────────────────────────────────────────────────
 
-const BOT_SUPPORTED_GAMES = new Set(['puissance4', 'yahtzee', 'diamant', 'battleship', 'uno']);
+const BOT_SUPPORTED_GAMES = new Set(['puissance4', 'yahtzee', 'diamant', 'battleship', 'uno', 'skyjow']);
 
 async function makeServerToken(): Promise<string> {
     return new SignJWT({ username: 'lobby-server' })
@@ -63,7 +63,13 @@ function sendUnoConfigure(lobbyId: string, lobby: any) {
     unoServerSocket.emit("uno:configure", { lobbyId, options: opts, expectedCount: lobby.players.size, preAssignedTeams: lobby.teams ? Object.fromEntries(lobby.teams) : null, botCount: lobby.bots ?? 0 });
 }
 function sendSkyjowConfigure(lobbyId: string, lobby: any) {
-    skyjowServerSocket.emit("skyjow:configure", { lobbyId, players: Array.from(lobby.players.values()), options: lobby.skyjowOptions ?? { eliminateRows: false } });
+    const humanPlayers = Array.from<any>(lobby.players.values());
+    const botsToSpawn = lobby.bots ?? 0;
+    const botPlayers = Array.from({ length: botsToSpawn }, (_, i) => ({
+        userId: `bot-skyjow-${randomUUID()}`,
+        username: botsToSpawn === 1 ? '🤖 Bot 1' : `🤖 Bot ${i + 1}`,
+    }));
+    skyjowServerSocket.emit("skyjow:configure", { lobbyId, players: [...humanPlayers, ...botPlayers], options: lobby.skyjowOptions ?? { eliminateRows: false } });
 }
 function sendYahtzeeConfigure(lobbyId: string, lobby: any) {
     yahtzeeServerSocket.emit("yahtzee:configure", { lobbyId, players: Array.from(lobby.players.values()) });
@@ -519,7 +525,8 @@ io.on("connection", (socket) => {
         if (gameType === "quiz" && !lobby.quizId) return;
         if (gameType === "quiz" && lobby.players.size < 1) return;
         if (gameType === "uno" && (lobby.players.size + (lobby.bots ?? 0)) < 2) return;
-        if (gameType === "skyjow" && (lobby.players.size < 2 || lobby.players.size > 8)) return;
+        if (gameType === "skyjow" && (lobby.players.size + (lobby.bots ?? 0)) < 2) return;
+        if (gameType === "skyjow" && (lobby.players.size + (lobby.bots ?? 0)) > 8) return;
         if (gameType === "puissance4" && (lobby.players.size + (lobby.bots ?? 0)) < 2) return;
         if (gameType === "puissance4" && (lobby.players.size + (lobby.bots ?? 0)) > 2) return;
         if (gameType === "battleship" && (lobby.players.size + (lobby.bots ?? 0)) < 2) return;
@@ -560,9 +567,14 @@ io.on("connection", (socket) => {
             const opts = lobby.tabooOptions ?? { turnDuration: 60, totalRounds: 3, trapWordCount: 5, maxAttempts: 10, trapDuration: 60 };
             tabooServerSocket.emit("taboo:configure", { lobbyId, options: opts, teams: lobby.teams ? Object.fromEntries(lobby.teams) : null, orators: lobby.orators ?? { "0": null, "1": null }, hostId: lobby.hostId }, () => startGame({ gameType: "taboo", lobbyId }));
         } else if (gameType === "skyjow") {
-            const players = Array.from<any>(lobby.players.values());
+            const humanPlayers = Array.from<any>(lobby.players.values());
+            const botsToSpawn = lobby.bots ?? 0;
+            const botPlayers = Array.from({ length: botsToSpawn }, (_, i) => ({
+                userId: `bot-skyjow-${randomUUID()}`,
+                username: botsToSpawn === 1 ? '🤖 Bot 1' : `🤖 Bot ${i + 1}`,
+            }));
             const opts = lobby.skyjowOptions ?? { eliminateRows: false };
-            skyjowServerSocket.emit("skyjow:configure", { lobbyId, players, options: opts }, () => startGame({ gameType: "skyjow", lobbyId }));
+            skyjowServerSocket.emit("skyjow:configure", { lobbyId, players: [...humanPlayers, ...botPlayers], options: opts }, () => startGame({ gameType: "skyjow", lobbyId }));
         } else if (gameType === "yahtzee") {
             const humanPlayers = Array.from<any>(lobby.players.values());
             const botsToSpawn = lobby.bots ?? 0;
