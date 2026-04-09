@@ -383,8 +383,10 @@ io.on("connection", (socket) => {
         const lobby = lobbies.get(lobbyId);
         if (!lobby || lobby.hostId !== userId) return;
         if (timeMode !== undefined) {
-            if (!["per_question", "total", "none"].includes(timeMode)) return;
-            lobby.timeMode = timeMode;
+            // Normalize "quiz:per_question" → "per_question" for storage
+            const normalizedMode = timeMode === 'quiz:per_question' ? 'per_question' : timeMode;
+            if (!["per_question", "total", "none"].includes(normalizedMode)) return;
+            lobby.timeMode = normalizedMode;
         }
         if (timePerQuestion !== undefined) {
             const t = Number(timePerQuestion);
