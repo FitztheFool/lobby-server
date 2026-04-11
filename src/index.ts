@@ -1,6 +1,7 @@
 // lobby-server/src/index.ts
 import 'dotenv/config';
 import express from 'express';
+import cors from 'cors';
 import http from 'http';
 import { Server } from 'socket.io';
 import { corsConfig, setupSocketAuth } from '@kwizar/shared';
@@ -8,6 +9,7 @@ import { initGameServers, setupReconnectHandlers } from './gameServers';
 import { registerHandlers } from './handlers';
 
 const app = express();
+app.use(cors({ origin: process.env.FRONTEND_URL, credentials: true }));
 app.get('/health', (_req, res) => res.status(200).send('ok'));
 
 const server = http.createServer(app);
