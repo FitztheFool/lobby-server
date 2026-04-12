@@ -9,8 +9,7 @@ import { initGameServers, setupReconnectHandlers } from './gameServers';
 import { registerHandlers } from './handlers';
 
 const app = express();
-app.use(cors({ origin: process.env.FRONTEND_URL, credentials: true }));
-app.get('/health', (_req, res) => res.status(200).send('ok'));
+app.get('/health', cors(), (_req, res) => res.status(200).send('ok'));
 
 const server = http.createServer(app);
 const io = new Server(server, { cors: corsConfig });
