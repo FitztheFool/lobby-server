@@ -24,7 +24,7 @@ function serverAuth(cb: (data: object) => void) {
 }
 
 function createGameSocket(url: string) {
-    return socketClient(url, { transports: ['websocket'], auth: serverAuth });
+    return socketClient(url, { transports: ['websocket'], auth: serverAuth, reconnectionDelay: 10_000, reconnectionDelayMax: 60_000 });
 }
 
 // ── Socket instances ──────────────────────────────────────────────────────────
