@@ -108,7 +108,6 @@ export async function ensureConnected(gameType: string): Promise<void> {
             reject(new Error(`socket_timeout:${gameType}`));
         }, 90_000);
         sock.once('connect', () => { clearTimeout(timeout); console.log(`[CONN] ${gameType}: socket connected`); resolve(); });
-        sock.once('connect_error', (err) => { clearTimeout(timeout); console.log(`[CONN] ${gameType}: connect_error during ensureConnected: ${err.message}`); reject(err); });
     });
     sock.connect();
     await connectPromise;
