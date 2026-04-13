@@ -366,10 +366,11 @@ export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string
 
     socket.on('lobby:start', async () => {
         const { lobbyId, userId } = socket.data || {};
-        if (!lobbyId || !userId) return;
+        if (!lobbyId || !userId) { console.log('[START] abort: no lobbyId/userId on socket'); return; }
         const lobby = lobbies.get(lobbyId);
-        if (!lobby || lobby.hostId !== userId) return;
-        if (!canStart(lobby)) return;
+        if (!lobby) { console.log(`[START] abort: lobby ${lobbyId} not found (server may have restarted)`); return; }
+        if (lobby.hostId !== userId) { console.log(`[START] abort: ${userId} is not host of ${lobbyId}`); return; }
+        if (!canStart(lobby)) { console.log(`[START] abort: canStart=false for ${lobbyId} (${lobby.gameType}, ${lobby.players.size} players)`); return; }
 
         const gameType = lobby.gameType ?? 'quiz';
         const targetSocket = GAME_SOCKETS[gameType];
