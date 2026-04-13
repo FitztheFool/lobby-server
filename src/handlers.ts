@@ -104,8 +104,10 @@ export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string
 
     socket.on('chat:send', ({ text, team }) => {
         const { lobbyId, userId, username } = socket.data;
-        if (!lobbyId || !text) return;
-        const msg = { userId, username, text, sentAt: Date.now() };
+        if (!lobbyId || !text || typeof text !== 'string') return;
+        const safeText = text.trim().slice(0, 500);
+        if (!safeText) return;
+        const msg = { userId, username, text: safeText, sentAt: Date.now() };
         if (team === 0 || team === 1) {
             io.to(`lobby:${lobbyId}:team:${team}`).emit('chat:message:team', msg);
         } else {
@@ -370,13 +372,17 @@ export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string
         if (!canStart(lobby)) return;
 
         const gameType = lobby.gameType ?? 'quiz';
-
-        // Wake the game server if sleeping (Render free tier)
         const targetSocket = GAME_SOCKETS[gameType];
-        if (targetSocket && !targetSocket.connected) {
+
+        const doWake = async () => {
             io.to(`lobby:${lobbyId}`).emit('lobby:server_warming', { estimatedSeconds: 40 });
+            await ensureConnected(gameType);
+        };
+
+        // Step 1: wake if obviously disconnected
+        if (targetSocket && !targetSocket.connected) {
             try {
-                await ensureConnected(gameType);
+                await doWake();
             } catch {
                 io.to(`lobby:${lobbyId}`).emit('lobby:server_error');
                 lobby.status = 'WAITING';
@@ -394,7 +400,32 @@ export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string
             io.to(`lobby:${lobbyId}`).emit('game:start', fullPayload);
         };
 
+        // Step 2: send configure; if ack doesn't arrive in 8s the socket is stale → wake
+        let done = false;
+        const ackTimer = setTimeout(async () => {
+            if (done) return;
+            done = true;
+            lobby.status = 'WAITING';
+            emitLobbyState(io, lobbyId, lobby);
+            targetSocket?.disconnect();
+            try {
+                await doWake();
+            } catch {
+                io.to(`lobby:${lobbyId}`).emit('lobby:server_error');
+                return;
+            }
+            lobby.status = 'PLAYING';
+            emitLobbyState(io, lobbyId, lobby);
+            sendConfigure(gameType, lobbyId, lobby, () => {
+                if (gameType === 'quiz') startGame({ gameType: 'quiz', quizId: lobby.quizId });
+                else startGame({ gameType, lobbyId });
+            });
+        }, 8_000);
+
         sendConfigure(gameType, lobbyId, lobby, () => {
+            if (done) return;
+            done = true;
+            clearTimeout(ackTimer);
             if (gameType === 'quiz') startGame({ gameType: 'quiz', quizId: lobby.quizId });
             else startGame({ gameType, lobbyId });
         });

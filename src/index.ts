@@ -12,7 +12,7 @@ const app = express();
 app.get('/health', cors(), (_req, res) => res.status(200).send('ok'));
 
 const server = http.createServer(app);
-const io = new Server(server, { cors: corsConfig });
+const io = new Server(server, { cors: corsConfig, maxHttpBufferSize: 1e5 });
 
 const SOCKET_SECRET = new TextEncoder().encode(process.env.INTERNAL_API_KEY!);
 initGameServers(SOCKET_SECRET);
