@@ -24,7 +24,13 @@ function serverAuth(cb: (data: object) => void) {
 }
 
 function createGameSocket(url: string) {
-    return socketClient(url, { transports: ['websocket'], auth: serverAuth, reconnectionDelay: 10_000, reconnectionDelayMax: 60_000 });
+    return socketClient(url, {
+        transports: ['websocket'],
+        auth: serverAuth,
+        autoConnect: false,          // connect only on demand (ensureConnected)
+        reconnectionDelay: 10_000,
+        reconnectionDelayMax: 300_000, // 5 min max between retries once connected
+    });
 }
 
 // ── Socket instances ──────────────────────────────────────────────────────────
@@ -116,7 +122,9 @@ export async function ensureConnected(gameType: string): Promise<void> {
 export function preWarm(gameType: string): void {
     const sock = GAME_SOCKETS[gameType];
     if (sock?.connected) return;
-    wakeGameServer(gameType).catch(() => { /* best-effort */ });
+    wakeGameServer(gameType)
+        .then(() => { if (sock && !sock.connected) sock.connect(); })
+        .catch(() => { /* best-effort */ });
 }
 
 // ── Configure senders (used on lobby:start + reconnect) ───────────────────────
