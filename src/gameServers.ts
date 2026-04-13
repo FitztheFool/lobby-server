@@ -71,7 +71,7 @@ export const GAME_SOCKETS: Record<string, ReturnType<typeof createGameSocket>> =
 async function wakeGameServer(gameType: string): Promise<void> {
     const url = GAME_SERVER_URLS[gameType];
     if (!url) return;
-    const deadline = Date.now() + 70_000;
+    const deadline = Date.now() + 90_000;
     while (Date.now() < deadline) {
         try {
             const res = await fetch(`${url}/health`, { signal: AbortSignal.timeout(5_000) });
@@ -89,7 +89,7 @@ export async function ensureConnected(gameType: string): Promise<void> {
     if (sock.connected) return; // may have reconnected during wake polling
     sock.connect(); // force immediate reconnect, bypasses exponential backoff
     await new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(() => reject(new Error(`socket_timeout:${gameType}`)), 30_000);
+        const timeout = setTimeout(() => reject(new Error(`socket_timeout:${gameType}`)), 90_000);
         sock.once('connect', () => { clearTimeout(timeout); resolve(); });
     });
 }
