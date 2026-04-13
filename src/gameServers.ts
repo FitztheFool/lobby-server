@@ -35,7 +35,7 @@ export const tabooServerSocket    = createGameSocket(process.env.TABOO_SERVER_UR
 export const skyjowServerSocket   = createGameSocket(process.env.SKYJOW_SERVER_URL     ?? 'http://localhost:10004');
 export const yahtzeeServerSocket  = createGameSocket(process.env.YAHTZEE_SERVER_URL    ?? 'http://localhost:10005');
 export const puissance4ServerSocket = createGameSocket(process.env.PUISSANCE4_SERVER_URL ?? 'http://localhost:10006');
-export const justOneServerSocket  = createGameSocket(process.env.JUST_ONE_SERVER_URL   ?? 'http://localhost:10007');
+export const justOneServerSocket  = createGameSocket(process.env.JUSTONE_SERVER_URL ?? process.env.JUST_ONE_SERVER_URL   ?? 'http://localhost:10007');
 export const battleshipServerSocket = createGameSocket(process.env.BATTLESHIP_SERVER_URL ?? 'http://localhost:10008');
 export const diamantServerSocket  = createGameSocket(process.env.DIAMANT_SERVER_URL    ?? 'http://localhost:10009');
 export const impostorServerSocket = createGameSocket(process.env.IMPOSTOR_SERVER_URL   ?? 'http://localhost:10010');
@@ -47,7 +47,7 @@ export const GAME_SERVER_URLS: Record<string, string> = {
     skyjow:     process.env.SKYJOW_SERVER_URL     ?? 'http://localhost:10004',
     yahtzee:    process.env.YAHTZEE_SERVER_URL    ?? 'http://localhost:10005',
     puissance4: process.env.PUISSANCE4_SERVER_URL ?? 'http://localhost:10006',
-    just_one:   process.env.JUST_ONE_SERVER_URL   ?? 'http://localhost:10007',
+    just_one:   process.env.JUSTONE_SERVER_URL ?? process.env.JUST_ONE_SERVER_URL   ?? 'http://localhost:10007',
     battleship: process.env.BATTLESHIP_SERVER_URL ?? 'http://localhost:10008',
     diamant:    process.env.DIAMANT_SERVER_URL    ?? 'http://localhost:10009',
     impostor:   process.env.IMPOSTOR_SERVER_URL   ?? 'http://localhost:10010',
