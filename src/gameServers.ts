@@ -29,16 +29,24 @@ function createGameSocket(url: string) {
 
 // ── Socket instances ──────────────────────────────────────────────────────────
 
-export const unoServerSocket      = createGameSocket(process.env.UNO_SERVER_URL        ?? 'http://localhost:10001');
-export const quizServerSocket     = createGameSocket(process.env.QUIZ_SERVER_URL       ?? 'http://localhost:10002');
-export const tabooServerSocket    = createGameSocket(process.env.TABOO_SERVER_URL      ?? 'http://localhost:10003');
-export const skyjowServerSocket   = createGameSocket(process.env.SKYJOW_SERVER_URL     ?? 'http://localhost:10004');
-export const yahtzeeServerSocket  = createGameSocket(process.env.YAHTZEE_SERVER_URL    ?? 'http://localhost:10005');
-export const puissance4ServerSocket = createGameSocket(process.env.PUISSANCE4_SERVER_URL ?? 'http://localhost:10006');
-export const justOneServerSocket  = createGameSocket(process.env.JUSTONE_SERVER_URL ?? process.env.JUST_ONE_SERVER_URL   ?? 'http://localhost:10007');
-export const battleshipServerSocket = createGameSocket(process.env.BATTLESHIP_SERVER_URL ?? 'http://localhost:10008');
-export const diamantServerSocket  = createGameSocket(process.env.DIAMANT_SERVER_URL    ?? 'http://localhost:10009');
-export const impostorServerSocket = createGameSocket(process.env.IMPOSTOR_SERVER_URL   ?? 'http://localhost:10010');
+function createLoggingGameSocket(name: string, url: string) {
+    const sock = createGameSocket(url);
+    sock.on('connect',            () => console.log(`[SOCK] ${name} connected`));
+    sock.on('disconnect', (reason) => console.log(`[SOCK] ${name} disconnected:`, reason));
+    sock.on('connect_error', (err) => console.log(`[SOCK] ${name} connect_error:`, err.message));
+    return sock;
+}
+
+export const unoServerSocket      = createLoggingGameSocket('uno',        process.env.UNO_SERVER_URL        ?? 'http://localhost:10001');
+export const quizServerSocket     = createLoggingGameSocket('quiz',       process.env.QUIZ_SERVER_URL       ?? 'http://localhost:10002');
+export const tabooServerSocket    = createLoggingGameSocket('taboo',      process.env.TABOO_SERVER_URL      ?? 'http://localhost:10003');
+export const skyjowServerSocket   = createLoggingGameSocket('skyjow',     process.env.SKYJOW_SERVER_URL     ?? 'http://localhost:10004');
+export const yahtzeeServerSocket  = createLoggingGameSocket('yahtzee',    process.env.YAHTZEE_SERVER_URL    ?? 'http://localhost:10005');
+export const puissance4ServerSocket = createLoggingGameSocket('puissance4', process.env.PUISSANCE4_SERVER_URL ?? 'http://localhost:10006');
+export const justOneServerSocket  = createLoggingGameSocket('just_one',   process.env.JUSTONE_SERVER_URL ?? process.env.JUST_ONE_SERVER_URL   ?? 'http://localhost:10007');
+export const battleshipServerSocket = createLoggingGameSocket('battleship', process.env.BATTLESHIP_SERVER_URL ?? 'http://localhost:10008');
+export const diamantServerSocket  = createLoggingGameSocket('diamant',    process.env.DIAMANT_SERVER_URL    ?? 'http://localhost:10009');
+export const impostorServerSocket = createLoggingGameSocket('impostor',   process.env.IMPOSTOR_SERVER_URL   ?? 'http://localhost:10010');
 
 export const GAME_SERVER_URLS: Record<string, string> = {
     uno:        process.env.UNO_SERVER_URL        ?? 'http://localhost:10001',
@@ -70,13 +78,17 @@ export const GAME_SOCKETS: Record<string, ReturnType<typeof createGameSocket>> =
 
 async function wakeGameServer(gameType: string): Promise<void> {
     const url = GAME_SERVER_URLS[gameType];
-    if (!url) return;
+    if (!url) { console.log(`[WAKE] ${gameType}: no URL configured`); return; }
+    console.log(`[WAKE] ${gameType}: polling ${url}/health`);
     const deadline = Date.now() + 90_000;
+    let attempt = 0;
     while (Date.now() < deadline) {
+        attempt++;
         try {
             const res = await fetch(`${url}/health`, { signal: AbortSignal.timeout(5_000) });
-            if (res.ok) return;
-        } catch { /* still sleeping */ }
+            if (res.ok) { console.log(`[WAKE] ${gameType}: health OK after ${attempt} attempt(s)`); return; }
+            console.log(`[WAKE] ${gameType}: health status ${res.status}`);
+        } catch (e: any) { console.log(`[WAKE] ${gameType}: attempt ${attempt} failed: ${e.message}`); }
         await new Promise(r => setTimeout(r, 3_000));
     }
     throw new Error(`wake_timeout:${gameType}`);
@@ -84,14 +96,22 @@ async function wakeGameServer(gameType: string): Promise<void> {
 
 export async function ensureConnected(gameType: string): Promise<void> {
     const sock = GAME_SOCKETS[gameType];
-    if (!sock || sock.connected) return;
+    if (!sock || sock.connected) { console.log(`[CONN] ${gameType}: already connected, skip`); return; }
+    console.log(`[CONN] ${gameType}: not connected, waking...`);
     await wakeGameServer(gameType);
-    if (sock.connected) return; // may have reconnected during wake polling
-    sock.connect(); // force immediate reconnect, bypasses exponential backoff
-    await new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(() => reject(new Error(`socket_timeout:${gameType}`)), 90_000);
-        sock.once('connect', () => { clearTimeout(timeout); resolve(); });
+    if (sock.connected) { console.log(`[CONN] ${gameType}: reconnected during wake poll`); return; }
+    console.log(`[CONN] ${gameType}: forcing socket.connect()`);
+    // Register listener BEFORE connect() to avoid any race
+    const connectPromise = new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+            console.log(`[CONN] ${gameType}: socket_timeout after 90s`);
+            reject(new Error(`socket_timeout:${gameType}`));
+        }, 90_000);
+        sock.once('connect', () => { clearTimeout(timeout); console.log(`[CONN] ${gameType}: socket connected`); resolve(); });
+        sock.once('connect_error', (err) => { clearTimeout(timeout); console.log(`[CONN] ${gameType}: connect_error during ensureConnected: ${err.message}`); reject(err); });
     });
+    sock.connect();
+    await connectPromise;
 }
 
 export function preWarm(gameType: string): void {
