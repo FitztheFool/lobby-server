@@ -86,6 +86,8 @@ export async function ensureConnected(gameType: string): Promise<void> {
     const sock = GAME_SOCKETS[gameType];
     if (!sock || sock.connected) return;
     await wakeGameServer(gameType);
+    if (sock.connected) return; // may have reconnected during wake polling
+    sock.connect(); // force immediate reconnect, bypasses exponential backoff
     await new Promise<void>((resolve, reject) => {
         const timeout = setTimeout(() => reject(new Error(`socket_timeout:${gameType}`)), 30_000);
         sock.once('connect', () => { clearTimeout(timeout); resolve(); });
