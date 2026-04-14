@@ -25,7 +25,7 @@ function serverAuth(cb: (data: object) => void) {
 
 function createGameSocket(url: string) {
     return socketClient(url, {
-        transports: ['websocket'],
+        transports: ['polling', 'websocket'], // polling fallback for server-to-server on Render
         auth: serverAuth,
         autoConnect: false,          // connect only on demand (ensureConnected)
         reconnectionDelay: 10_000,
@@ -39,7 +39,7 @@ function createLoggingGameSocket(name: string, url: string) {
     const sock = createGameSocket(url);
     sock.on('connect',            () => console.log(`[SOCK] ${name} connected`));
     sock.on('disconnect', (reason) => console.log(`[SOCK] ${name} disconnected:`, reason));
-    sock.on('connect_error', (err) => console.log(`[SOCK] ${name} connect_error:`, err.message));
+    sock.on('connect_error', (err) => console.log(`[SOCK] ${name} connect_error:`, err.message, (err as any).cause?.message ?? ''));
     return sock;
 }
 
