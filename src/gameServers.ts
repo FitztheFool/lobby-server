@@ -28,8 +28,8 @@ function createGameSocket(url: string) {
         transports: ['polling', 'websocket'], // polling fallback for server-to-server on Render
         auth: serverAuth,
         autoConnect: false,         // connect only on demand (ensureConnected / preWarm)
-        reconnectionDelay: 3_000,   // retry every 3s initially — catches the Render cold-start window
-        reconnectionDelayMax: 15_000,
+        reconnectionDelay: 2_000,   // retry every 2s initially — catches the Render cold-start window
+        reconnectionDelayMax: 10_000,
     });
 }
 
@@ -100,9 +100,9 @@ export async function ensureConnected(gameType: string): Promise<void> {
     const promise = new Promise<void>((resolve, reject) => {
         const timeout = setTimeout(() => {
             connectingPromises.delete(gameType);
-            console.log(`[CONN] ${gameType}: timeout after 90s`);
+            console.log(`[CONN] ${gameType}: timeout after 120s`);
             reject(new Error(`socket_timeout:${gameType}`));
-        }, 90_000);
+        }, 120_000);
         sock.once('connect', () => {
             clearTimeout(timeout);
             connectingPromises.delete(gameType);
