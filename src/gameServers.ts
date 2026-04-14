@@ -100,6 +100,7 @@ export async function ensureConnected(gameType: string): Promise<void> {
     const promise = new Promise<void>((resolve, reject) => {
         const timeout = setTimeout(() => {
             connectingPromises.delete(gameType);
+            sock.disconnect(); // stop retrying — server didn't wake in time
             console.log(`[CONN] ${gameType}: timeout after 120s`);
             reject(new Error(`socket_timeout:${gameType}`));
         }, 120_000);
