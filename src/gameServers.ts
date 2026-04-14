@@ -27,9 +27,9 @@ function createGameSocket(url: string) {
     return socketClient(url, {
         transports: ['polling', 'websocket'], // polling fallback for server-to-server on Render
         auth: serverAuth,
-        autoConnect: false,          // connect only on demand (ensureConnected)
-        reconnectionDelay: 10_000,
-        reconnectionDelayMax: 300_000, // 5 min max between retries once connected
+        autoConnect: false,         // connect only on demand (ensureConnected / preWarm)
+        reconnectionDelay: 3_000,   // retry every 3s initially — catches the Render cold-start window
+        reconnectionDelayMax: 15_000,
     });
 }
 
@@ -81,50 +81,45 @@ export const GAME_SOCKETS: Record<string, ReturnType<typeof createGameSocket>> =
 };
 
 // ── Wake-on-demand (Render free tier) ─────────────────────────────────────────
+// The socket connection attempt itself is an inbound request that wakes the Render service.
+// HTTP health-check polling caused 429 rate-limiting, so we rely on Socket.IO reconnects instead.
 
-async function wakeGameServer(gameType: string): Promise<void> {
-    const url = GAME_SERVER_URLS[gameType];
-    if (!url) { console.log(`[WAKE] ${gameType}: no URL configured`); return; }
-    console.log(`[WAKE] ${gameType}: polling ${url}/health`);
-    const deadline = Date.now() + 90_000;
-    let attempt = 0;
-    while (Date.now() < deadline) {
-        attempt++;
-        try {
-            const res = await fetch(`${url}/health`, { signal: AbortSignal.timeout(5_000) });
-            if (res.ok) { console.log(`[WAKE] ${gameType}: server awake after ${attempt} attempt(s) (status ${res.status})`); return; }
-            console.log(`[WAKE] ${gameType}: health status ${res.status}, still starting`);
-        } catch (e: any) { console.log(`[WAKE] ${gameType}: attempt ${attempt} failed: ${e.message}`); }
-        await new Promise(r => setTimeout(r, 8_000));
-    }
-    throw new Error(`wake_timeout:${gameType}`);
-}
+// Dedup: if ensureConnected is already running for a game type, share the same promise.
+const connectingPromises = new Map<string, Promise<void>>();
 
 export async function ensureConnected(gameType: string): Promise<void> {
     const sock = GAME_SOCKETS[gameType];
-    if (!sock || sock.connected) { console.log(`[CONN] ${gameType}: already connected, skip`); return; }
-    console.log(`[CONN] ${gameType}: not connected, waking...`);
-    await wakeGameServer(gameType);
-    if (sock.connected) { console.log(`[CONN] ${gameType}: reconnected during wake poll`); return; }
-    console.log(`[CONN] ${gameType}: forcing socket.connect()`);
-    // Register listener BEFORE connect() to avoid any race
-    const connectPromise = new Promise<void>((resolve, reject) => {
+    if (!sock || sock.connected) { console.log(`[CONN] ${gameType}: already connected`); return; }
+
+    // Return the in-progress promise if a connection attempt is already underway
+    const existing = connectingPromises.get(gameType);
+    if (existing) { console.log(`[CONN] ${gameType}: joining existing connect attempt`); return existing; }
+
+    console.log(`[CONN] ${gameType}: connecting (socket connect wakes Render)...`);
+
+    const promise = new Promise<void>((resolve, reject) => {
         const timeout = setTimeout(() => {
-            console.log(`[CONN] ${gameType}: socket_timeout after 90s`);
+            connectingPromises.delete(gameType);
+            console.log(`[CONN] ${gameType}: timeout after 90s`);
             reject(new Error(`socket_timeout:${gameType}`));
         }, 90_000);
-        sock.once('connect', () => { clearTimeout(timeout); console.log(`[CONN] ${gameType}: socket connected`); resolve(); });
+        sock.once('connect', () => {
+            clearTimeout(timeout);
+            connectingPromises.delete(gameType);
+            console.log(`[CONN] ${gameType}: connected`);
+            resolve();
+        });
     });
-    sock.connect();
-    await connectPromise;
+
+    connectingPromises.set(gameType, promise);
+    sock.connect(); // the HTTP handshake is an inbound request → wakes Render; retries every 3–15s
+    return promise;
 }
 
 export function preWarm(gameType: string): void {
     const sock = GAME_SOCKETS[gameType];
     if (sock?.connected) return;
-    wakeGameServer(gameType)
-        .then(() => { if (sock && !sock.connected) sock.connect(); })
-        .catch(() => { /* best-effort */ });
+    ensureConnected(gameType).catch(() => { /* best-effort pre-warm */ });
 }
 
 // ── Configure senders (used on lobby:start + reconnect) ───────────────────────
