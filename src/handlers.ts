@@ -365,6 +365,7 @@ export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string
     // ── Game server ready (browser confirmed health check passed) ─────────────
 
     socket.on('lobby:gameServerReady', ({ gameType }) => {
+        console.log(`[CONN] gameServerReady received for ${gameType} from socket ${socket.id}`);
         if (typeof gameType === 'string') notifyGameServerReady(gameType);
     });
 

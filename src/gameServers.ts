@@ -94,7 +94,7 @@ export async function ensureConnected(gameType: string): Promise<void> {
     const existing = connectingPromises.get(gameType);
     if (existing) { console.log(`[CONN] ${gameType}: joining existing connect attempt`); return existing; }
 
-    console.log(`[CONN] ${gameType}: connecting (socket connect wakes Render)...`);
+    console.log(`[CONN] ${gameType}: connecting...`);
 
     const promise = new Promise<void>((resolve, reject) => {
         const timeout = setTimeout(() => {
@@ -108,10 +108,15 @@ export async function ensureConnected(gameType: string): Promise<void> {
             console.log(`[CONN] ${gameType}: connected`);
             resolve();
         });
+
+        // Fallback retries in case the browser notification never arrives.
+        // Only 2 extra attempts over 120s — far less than the old 2-10s loop.
+        setTimeout(() => { if (!sock.connected) { console.log(`[CONN] ${gameType}: retry at 35s`); sock.disconnect(); sock.connect(); } }, 35_000);
+        setTimeout(() => { if (!sock.connected) { console.log(`[CONN] ${gameType}: retry at 75s`); sock.disconnect(); sock.connect(); } }, 75_000);
     });
 
     connectingPromises.set(gameType, promise);
-    sock.connect(); // one attempt — reconnection:false means no retry spam that would trigger Render IP rate-limiting
+    sock.connect(); // first attempt; reconnection:false so no auto-retry spam
     return promise;
 }
 
@@ -127,8 +132,8 @@ export function preWarm(gameType: string): void {
 // that we know the server is up, bypassing Render's IP-based rate limiting.
 export function notifyGameServerReady(gameType: string): void {
     const sock = GAME_SOCKETS[gameType];
-    if (!sock || sock.connected) return;
-    if (!connectingPromises.has(gameType)) return; // nobody is waiting — no-op
+    if (!sock || sock.connected) { console.log(`[CONN] ${gameType}: gameServerReady ignored (already connected or unknown)`); return; }
+    if (!connectingPromises.has(gameType)) { console.log(`[CONN] ${gameType}: gameServerReady ignored (no active wait)`); return; }
     console.log(`[CONN] ${gameType}: browser confirmed awake, retrying socket connection`);
     sock.disconnect(); // ensure clean state in case a connection attempt is still in-flight
     sock.connect();
