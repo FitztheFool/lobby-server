@@ -80,43 +80,69 @@ export const GAME_SOCKETS: Record<string, ReturnType<typeof createGameSocket>> =
 };
 
 // ── Wake-on-demand (Render free tier) ─────────────────────────────────────────
-// The socket connection attempt itself is an inbound request that wakes the Render service.
-// HTTP health-check polling caused 429 rate-limiting, so we rely on Socket.IO reconnects instead.
+// Strategy: poll /health every 20s (5-6 requests over 120s, well below Render's rate limit),
+// then connect the socket ONLY once the HTTP layer confirms the server is alive.
+// Attempting socket connections to a sleeping server triggers Socket.IO polling (GET requests)
+// which Render rate-limits (429) aggressively from the same IP.
 
 // Dedup: if ensureConnected is already running for a game type, share the same promise.
 const connectingPromises = new Map<string, Promise<void>>();
+
+// Poll /health until the game server responds 200, or until deadline.
+// Exits early if the socket is already connected (notifyGameServerReady beat us to it).
+async function waitForHealth(gameType: string, sock: ReturnType<typeof createGameSocket>, deadlineMs: number): Promise<void> {
+    const url = GAME_SERVER_URLS[gameType];
+    if (!url) return;
+    const start = Date.now();
+    let attempt = 0;
+    while (Date.now() - start < deadlineMs) {
+        if (sock.connected) return; // socket already up (notifyGameServerReady connected it)
+        attempt++;
+        try {
+            const r = await fetch(`${url}/health`, { signal: AbortSignal.timeout(4_000) });
+            console.log(`[HEALTH] ${gameType} attempt ${attempt}: status ${r.status}`);
+            if (r.ok) return;
+        } catch (e: any) {
+            console.log(`[HEALTH] ${gameType} attempt ${attempt}: ${e.message}`);
+        }
+        if (sock.connected) return;
+        const remaining = deadlineMs - (Date.now() - start);
+        if (remaining <= 0) break;
+        await new Promise(r => setTimeout(r, Math.min(20_000, remaining)));
+    }
+    if (sock.connected) return;
+    throw new Error(`health_timeout:${gameType}`);
+}
 
 export async function ensureConnected(gameType: string): Promise<void> {
     const sock = GAME_SOCKETS[gameType];
     if (!sock || sock.connected) { console.log(`[CONN] ${gameType}: already connected`); return; }
 
-    // Return the in-progress promise if a connection attempt is already underway
     const existing = connectingPromises.get(gameType);
     if (existing) { console.log(`[CONN] ${gameType}: joining existing connect attempt`); return existing; }
 
-    console.log(`[CONN] ${gameType}: connecting...`);
+    console.log(`[CONN] ${gameType}: waiting for server to be healthy...`);
 
-    const promise = new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(() => {
-            connectingPromises.delete(gameType);
-            console.log(`[CONN] ${gameType}: timeout after 120s`);
-            reject(new Error(`socket_timeout:${gameType}`));
-        }, 120_000);
-        sock.once('connect', () => {
-            clearTimeout(timeout);
-            connectingPromises.delete(gameType);
-            console.log(`[CONN] ${gameType}: connected`);
-            resolve();
-        });
+    const promise = (async () => {
+        try {
+            // Phase 1: poll /health until alive (wakes the sleeping Render service via HTTP)
+            await waitForHealth(gameType, sock, 105_000);
 
-        // Fallback retries in case the browser notification never arrives.
-        // Only 2 extra attempts over 120s — far less than the old 2-10s loop.
-        setTimeout(() => { if (!sock.connected) { console.log(`[CONN] ${gameType}: retry at 35s`); sock.disconnect(); sock.connect(); } }, 35_000);
-        setTimeout(() => { if (!sock.connected) { console.log(`[CONN] ${gameType}: retry at 75s`); sock.disconnect(); sock.connect(); } }, 75_000);
-    });
+            // Phase 2: server is alive — attempt socket connection once.
+            // Check sock.connected first: notifyGameServerReady may have already connected.
+            console.log(`[CONN] ${gameType}: server healthy, connecting socket...`);
+            await new Promise<void>((resolve, reject) => {
+                if (sock.connected) { resolve(); return; }
+                const t = setTimeout(() => reject(new Error(`socket_connect_timeout:${gameType}`)), 15_000);
+                sock.once('connect', () => { clearTimeout(t); console.log(`[CONN] ${gameType}: socket connected`); resolve(); });
+                sock.connect();
+            });
+        } finally {
+            connectingPromises.delete(gameType);
+        }
+    })();
 
     connectingPromises.set(gameType, promise);
-    sock.connect(); // first attempt; reconnection:false so no auto-retry spam
     return promise;
 }
 
@@ -126,16 +152,14 @@ export function preWarm(gameType: string): void {
     ensureConnected(gameType).catch(() => { /* best-effort pre-warm */ });
 }
 
-// Called when the browser (user's IP) confirms the game server is awake.
-// With reconnection:false, the initial sock.connect() attempt may have already
-// failed (connect_error) without retrying. This triggers a fresh attempt now
-// that we know the server is up, bypassing Render's IP-based rate limiting.
+// Called when the browser (different IP, not rate-limited) confirms the game server is awake.
+// Kick off a socket connection immediately instead of waiting for the next /health poll.
 export function notifyGameServerReady(gameType: string): void {
     const sock = GAME_SOCKETS[gameType];
-    if (!sock || sock.connected) { console.log(`[CONN] ${gameType}: gameServerReady ignored (already connected or unknown)`); return; }
+    if (!sock || sock.connected) { console.log(`[CONN] ${gameType}: gameServerReady ignored (already connected)`); return; }
     if (!connectingPromises.has(gameType)) { console.log(`[CONN] ${gameType}: gameServerReady ignored (no active wait)`); return; }
-    console.log(`[CONN] ${gameType}: browser confirmed awake, retrying socket connection`);
-    sock.disconnect(); // ensure clean state in case a connection attempt is still in-flight
+    console.log(`[CONN] ${gameType}: browser confirmed awake, attempting socket connection now`);
+    sock.disconnect();
     sock.connect();
 }
 
