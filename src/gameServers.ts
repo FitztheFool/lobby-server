@@ -92,10 +92,10 @@ async function wakeGameServer(gameType: string): Promise<void> {
         attempt++;
         try {
             const res = await fetch(`${url}/health`, { signal: AbortSignal.timeout(5_000) });
-            if (res.status < 500) { console.log(`[WAKE] ${gameType}: server awake after ${attempt} attempt(s) (status ${res.status})`); return; }
+            if (res.ok) { console.log(`[WAKE] ${gameType}: server awake after ${attempt} attempt(s) (status ${res.status})`); return; }
             console.log(`[WAKE] ${gameType}: health status ${res.status}, still starting`);
         } catch (e: any) { console.log(`[WAKE] ${gameType}: attempt ${attempt} failed: ${e.message}`); }
-        await new Promise(r => setTimeout(r, 3_000));
+        await new Promise(r => setTimeout(r, 8_000));
     }
     throw new Error(`wake_timeout:${gameType}`);
 }
