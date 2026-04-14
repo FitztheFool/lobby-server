@@ -5,11 +5,23 @@ import cors from 'cors';
 import http from 'http';
 import { Server } from 'socket.io';
 import { corsConfig, setupSocketAuth } from '@kwizar/shared';
-import { initGameServers, setupReconnectHandlers } from './gameServers';
+import { initGameServers, setupReconnectHandlers, GAME_SERVER_URLS } from './gameServers';
 import { registerHandlers } from './handlers';
 
 const app = express();
 app.get('/health', cors(), (_req, res) => res.status(200).send('ok'));
+
+// Proxy health check so the browser (not lobby-server) wakes the game server, avoiding IP-based rate limiting
+app.get('/warmup/:gameType', cors(), async (req, res) => {
+    const url = GAME_SERVER_URLS[req.params.gameType];
+    if (!url) { res.status(404).json({ status: 'unknown' }); return; }
+    try {
+        const r = await fetch(`${url}/health`, { signal: AbortSignal.timeout(5_000) });
+        res.status(r.ok ? 200 : 202).json({ status: r.ok ? 'ready' : 'starting', code: r.status });
+    } catch {
+        res.status(202).json({ status: 'sleeping' });
+    }
+});
 
 const server = http.createServer(app);
 const io = new Server(server, { cors: corsConfig, maxHttpBufferSize: 1e5 });
