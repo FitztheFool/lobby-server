@@ -17,9 +17,9 @@ app.get('/warmup/:gameType', cors(), async (req, res) => {
     if (!url) { res.status(404).json({ status: 'unknown' }); return; }
     try {
         const r = await fetch(`${url}/health`, { signal: AbortSignal.timeout(5_000) });
-        res.status(r.ok ? 200 : 202).json({ status: r.ok ? 'ready' : 'starting', code: r.status });
+        res.status(r.ok ? 200 : 202).json({ status: r.ok ? 'ready' : 'starting', code: r.status, gameServerUrl: url });
     } catch {
-        res.status(202).json({ status: 'sleeping' });
+        res.status(202).json({ status: 'sleeping', gameServerUrl: url });
     }
 });
 
