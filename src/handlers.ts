@@ -1,7 +1,7 @@
 // lobby-server/src/handlers.ts
 import { randomUUID } from 'crypto';
 import { Server, Socket } from 'socket.io';
-import { GAME_SOCKETS, ensureConnected, preWarm, sendConfigure } from './gameServers';
+import { GAME_SOCKETS, ensureConnected, preWarm, sendConfigure, notifyGameServerReady } from './gameServers';
 import { emitLobbyState, broadcastLobbies, removePlayerAndMaybeTransferHost } from './lobbyHelpers';
 
 const BOT_SUPPORTED_GAMES = new Set(['puissance4', 'yahtzee', 'diamant', 'battleship', 'uno', 'skyjow']);
@@ -360,6 +360,12 @@ export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string
             lobby.orators['1'] = t1[Math.floor(Math.random() * t1.length)] ?? null;
         }
         emitLobbyState(io, lobbyId, lobby);
+    });
+
+    // ── Game server ready (browser confirmed health check passed) ─────────────
+
+    socket.on('lobby:gameServerReady', ({ gameType }) => {
+        if (typeof gameType === 'string') notifyGameServerReady(gameType);
     });
 
     // ── Start game ────────────────────────────────────────────────────────────

@@ -27,9 +27,8 @@ function createGameSocket(url: string) {
     return socketClient(url, {
         transports: ['polling', 'websocket'], // polling fallback for server-to-server on Render
         auth: serverAuth,
-        autoConnect: false,         // connect only on demand (ensureConnected / preWarm)
-        reconnectionDelay: 2_000,   // retry every 2s initially — catches the Render cold-start window
-        reconnectionDelayMax: 10_000,
+        autoConnect: false,   // connect only on demand (ensureConnected / preWarm)
+        reconnection: false,  // no auto-retry — we retry manually to avoid Render IP rate-limiting
     });
 }
 
@@ -39,7 +38,7 @@ function createLoggingGameSocket(name: string, url: string) {
     const sock = createGameSocket(url);
     sock.on('connect',            () => console.log(`[SOCK] ${name} connected`));
     sock.on('disconnect', (reason) => console.log(`[SOCK] ${name} disconnected:`, reason));
-    sock.on('connect_error', (err) => console.log(`[SOCK] ${name} connect_error:`, err.message, (err as any).cause?.message ?? ''));
+    sock.on('connect_error', (err: any) => console.log(`[SOCK] ${name} connect_error:`, err.message, err.description?.status ?? err.description?.message ?? err.description ?? ''));
     return sock;
 }
 
@@ -100,7 +99,6 @@ export async function ensureConnected(gameType: string): Promise<void> {
     const promise = new Promise<void>((resolve, reject) => {
         const timeout = setTimeout(() => {
             connectingPromises.delete(gameType);
-            sock.disconnect(); // stop retrying — server didn't wake in time
             console.log(`[CONN] ${gameType}: timeout after 120s`);
             reject(new Error(`socket_timeout:${gameType}`));
         }, 120_000);
@@ -113,7 +111,7 @@ export async function ensureConnected(gameType: string): Promise<void> {
     });
 
     connectingPromises.set(gameType, promise);
-    sock.connect(); // the HTTP handshake is an inbound request → wakes Render; retries every 3–15s
+    sock.connect(); // one attempt — reconnection:false means no retry spam that would trigger Render IP rate-limiting
     return promise;
 }
 
@@ -121,6 +119,19 @@ export function preWarm(gameType: string): void {
     const sock = GAME_SOCKETS[gameType];
     if (sock?.connected) return;
     ensureConnected(gameType).catch(() => { /* best-effort pre-warm */ });
+}
+
+// Called when the browser (user's IP) confirms the game server is awake.
+// With reconnection:false, the initial sock.connect() attempt may have already
+// failed (connect_error) without retrying. This triggers a fresh attempt now
+// that we know the server is up, bypassing Render's IP-based rate limiting.
+export function notifyGameServerReady(gameType: string): void {
+    const sock = GAME_SOCKETS[gameType];
+    if (!sock || sock.connected) return;
+    if (!connectingPromises.has(gameType)) return; // nobody is waiting — no-op
+    console.log(`[CONN] ${gameType}: browser confirmed awake, retrying socket connection`);
+    sock.disconnect(); // ensure clean state in case a connection attempt is still in-flight
+    sock.connect();
 }
 
 // ── Configure senders (used on lobby:start + reconnect) ───────────────────────
