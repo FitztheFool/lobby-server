@@ -1,7 +1,7 @@
 // lobby-server/src/handlers.ts
 import { randomUUID } from 'crypto';
 import { Server, Socket } from 'socket.io';
-import { gameServerConnections, ensureConnected, preWarm, sendConfigure } from './gameServers';
+import { gameServerConnections, ensureConnected, preWarm, sendConfigure, GAME_SERVER_URLS } from './gameServers';
 import { emitLobbyState, broadcastLobbies, removePlayerAndMaybeTransferHost } from './lobbyHelpers';
 
 const BOT_SUPPORTED_GAMES = new Set(['puissance4', 'yahtzee', 'diamant', 'battleship', 'uno', 'skyjow']);
@@ -376,6 +376,9 @@ export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string
 
         const doWake = async () => {
             io.to(`lobby:${lobbyId}`).emit('lobby:server_warming', { estimatedSeconds: 60 });
+            // Fire-and-forget: wake the Render service (one HTTP request is enough to trigger cold start)
+            const gsUrl = GAME_SERVER_URLS[gameType];
+            if (gsUrl) fetch(`${gsUrl}/health`, { signal: AbortSignal.timeout(5_000) }).catch(() => {});
             await ensureConnected(gameType);
         };
 
