@@ -1,57 +1,11 @@
 // lobby-server/src/gameServers.ts
+// NEW ARCHITECTURE: game servers connect TO the lobby-server on startup.
+// The lobby-server no longer initiates outbound connections to sleeping Render services,
+// which eliminates the 429 rate-limiting issue entirely.
 import 'dotenv/config';
 import { randomUUID } from 'crypto';
-import { SignJWT } from 'jose';
-import { io as socketClient } from 'socket.io-client';
 
-// ── Auth ──────────────────────────────────────────────────────────────────────
-
-let SOCKET_SECRET: Uint8Array;
-
-export function initGameServers(secret: Uint8Array) {
-    SOCKET_SECRET = secret;
-}
-
-async function makeServerToken(): Promise<string> {
-    return new SignJWT({ username: 'lobby-server' })
-        .setProtectedHeader({ alg: 'HS256' })
-        .setSubject('lobby-server')
-        .sign(SOCKET_SECRET);
-}
-
-function serverAuth(cb: (data: object) => void) {
-    makeServerToken().then(token => cb({ token }));
-}
-
-function createGameSocket(url: string) {
-    return socketClient(url, {
-        transports: ['polling', 'websocket'], // polling fallback for server-to-server on Render
-        auth: serverAuth,
-        autoConnect: false,   // connect only on demand (ensureConnected / preWarm)
-        reconnection: false,  // no auto-retry — we retry manually to avoid Render IP rate-limiting
-    });
-}
-
-// ── Socket instances ──────────────────────────────────────────────────────────
-
-function createLoggingGameSocket(name: string, url: string) {
-    const sock = createGameSocket(url);
-    sock.on('connect',            () => console.log(`[SOCK] ${name} connected`));
-    sock.on('disconnect', (reason) => console.log(`[SOCK] ${name} disconnected:`, reason));
-    sock.on('connect_error', (err: any) => console.log(`[SOCK] ${name} connect_error:`, err.message, err.description?.status ?? err.description?.message ?? err.description ?? ''));
-    return sock;
-}
-
-export const unoServerSocket      = createLoggingGameSocket('uno',        process.env.UNO_SERVER_URL        ?? 'http://localhost:10001');
-export const quizServerSocket     = createLoggingGameSocket('quiz',       process.env.QUIZ_SERVER_URL       ?? 'http://localhost:10002');
-export const tabooServerSocket    = createLoggingGameSocket('taboo',      process.env.TABOO_SERVER_URL      ?? 'http://localhost:10003');
-export const skyjowServerSocket   = createLoggingGameSocket('skyjow',     process.env.SKYJOW_SERVER_URL     ?? 'http://localhost:10004');
-export const yahtzeeServerSocket  = createLoggingGameSocket('yahtzee',    process.env.YAHTZEE_SERVER_URL    ?? 'http://localhost:10005');
-export const puissance4ServerSocket = createLoggingGameSocket('puissance4', process.env.PUISSANCE4_SERVER_URL ?? 'http://localhost:10006');
-export const justOneServerSocket  = createLoggingGameSocket('just_one',   process.env.JUSTONE_SERVER_URL ?? process.env.JUST_ONE_SERVER_URL   ?? 'http://localhost:10007');
-export const battleshipServerSocket = createLoggingGameSocket('battleship', process.env.BATTLESHIP_SERVER_URL ?? 'http://localhost:10008');
-export const diamantServerSocket  = createLoggingGameSocket('diamant',    process.env.DIAMANT_SERVER_URL    ?? 'http://localhost:10009');
-export const impostorServerSocket = createLoggingGameSocket('impostor',   process.env.IMPOSTOR_SERVER_URL   ?? 'http://localhost:10010');
+// ── Game server URLs (used by /warmup proxy endpoint only) ────────────────────
 
 export const GAME_SERVER_URLS: Record<string, string> = {
     uno:        process.env.UNO_SERVER_URL        ?? 'http://localhost:10001',
@@ -60,181 +14,142 @@ export const GAME_SERVER_URLS: Record<string, string> = {
     skyjow:     process.env.SKYJOW_SERVER_URL     ?? 'http://localhost:10004',
     yahtzee:    process.env.YAHTZEE_SERVER_URL    ?? 'http://localhost:10005',
     puissance4: process.env.PUISSANCE4_SERVER_URL ?? 'http://localhost:10006',
-    just_one:   process.env.JUSTONE_SERVER_URL ?? process.env.JUST_ONE_SERVER_URL   ?? 'http://localhost:10007',
+    just_one:   process.env.JUSTONE_SERVER_URL ?? process.env.JUST_ONE_SERVER_URL ?? 'http://localhost:10007',
     battleship: process.env.BATTLESHIP_SERVER_URL ?? 'http://localhost:10008',
     diamant:    process.env.DIAMANT_SERVER_URL    ?? 'http://localhost:10009',
     impostor:   process.env.IMPOSTOR_SERVER_URL   ?? 'http://localhost:10010',
 };
 
-export const GAME_SOCKETS: Record<string, ReturnType<typeof createGameSocket>> = {
-    uno:        unoServerSocket,
-    quiz:       quizServerSocket,
-    taboo:      tabooServerSocket,
-    skyjow:     skyjowServerSocket,
-    yahtzee:    yahtzeeServerSocket,
-    puissance4: puissance4ServerSocket,
-    just_one:   justOneServerSocket,
-    battleship: battleshipServerSocket,
-    diamant:    diamantServerSocket,
-    impostor:   impostorServerSocket,
-};
+// ── Inbound game server connections ───────────────────────────────────────────
+// Each game server connects here on startup with { token, gameType } auth.
 
-// ── Wake-on-demand (Render free tier) ─────────────────────────────────────────
-// Strategy: poll /health every 20s (5-6 requests over 120s, well below Render's rate limit),
-// then connect the socket ONLY once the HTTP layer confirms the server is alive.
-// Attempting socket connections to a sleeping server triggers Socket.IO polling (GET requests)
-// which Render rate-limits (429) aggressively from the same IP.
+export const gameServerConnections = new Map<string, any>(); // gameType → Socket
 
-// Dedup: if ensureConnected is already running for a game type, share the same promise.
+// Resolvers from ensureConnected() waiting for a game server to appear
+const pendingResolvers = new Map<string, () => void>();
 const connectingPromises = new Map<string, Promise<void>>();
 
-// Poll /health until the game server responds 200, or until deadline.
-// Exits early if the socket is already connected (notifyGameServerReady beat us to it).
-async function waitForHealth(gameType: string, sock: ReturnType<typeof createGameSocket>, deadlineMs: number): Promise<void> {
-    const url = GAME_SERVER_URLS[gameType];
-    if (!url) return;
-    const start = Date.now();
-    let attempt = 0;
-    while (Date.now() - start < deadlineMs) {
-        if (sock.connected) return; // socket already up (notifyGameServerReady connected it)
-        attempt++;
-        try {
-            const r = await fetch(`${url}/health`, { signal: AbortSignal.timeout(4_000) });
-            console.log(`[HEALTH] ${gameType} attempt ${attempt}: status ${r.status}`);
-            if (r.ok) return;
-        } catch (e: any) {
-            console.log(`[HEALTH] ${gameType} attempt ${attempt}: ${e.message}`);
+// Called from index.ts when a game server socket is identified
+export function registerGameServer(gameType: string, socket: any, lobbies: Map<string, any>): void {
+    const prev = gameServerConnections.get(gameType);
+    if (prev && prev !== socket) { prev.disconnect(true); }
+    gameServerConnections.set(gameType, socket);
+    console.log(`[GAME] ${gameType}: connected (${socket.id})`);
+
+    // Resolve any waiting ensureConnected promise
+    const resolver = pendingResolvers.get(gameType);
+    if (resolver) { pendingResolvers.delete(gameType); resolver(); }
+
+    socket.on('disconnect', (reason: string) => {
+        console.log(`[GAME] ${gameType}: disconnected: ${reason}`);
+        if (gameServerConnections.get(gameType) === socket) gameServerConnections.delete(gameType);
+    });
+
+    // Reconnect: resend configure for all in-progress lobbies of this game type
+    for (const [lobbyId, lobby] of lobbies) {
+        if (lobby.status === 'PLAYING' && (lobby.gameType ?? 'quiz') === gameType) {
+            console.log(`[GAME] ${gameType}: resending configure for lobby ${lobbyId}`);
+            sendConfigure(gameType, lobbyId, lobby);
         }
-        if (sock.connected) return;
-        const remaining = deadlineMs - (Date.now() - start);
-        if (remaining <= 0) break;
-        await new Promise(r => setTimeout(r, Math.min(20_000, remaining)));
     }
-    if (sock.connected) return;
-    throw new Error(`health_timeout:${gameType}`);
 }
 
+// ── Wait for a game server to connect ─────────────────────────────────────────
+
 export async function ensureConnected(gameType: string): Promise<void> {
-    const sock = GAME_SOCKETS[gameType];
-    if (!sock || sock.connected) { console.log(`[CONN] ${gameType}: already connected`); return; }
+    if (gameServerConnections.has(gameType)) { console.log(`[CONN] ${gameType}: already connected`); return; }
 
     const existing = connectingPromises.get(gameType);
-    if (existing) { console.log(`[CONN] ${gameType}: joining existing connect attempt`); return existing; }
+    if (existing) { console.log(`[CONN] ${gameType}: waiting for game server...`); return existing; }
 
-    console.log(`[CONN] ${gameType}: waiting for server to be healthy...`);
+    console.log(`[CONN] ${gameType}: waiting for game server to connect...`);
 
-    const promise = (async () => {
-        try {
-            // Phase 1: poll /health until alive (wakes the sleeping Render service via HTTP)
-            await waitForHealth(gameType, sock, 105_000);
-
-            // Phase 2: server is alive — attempt socket connection once.
-            // Check sock.connected first: notifyGameServerReady may have already connected.
-            console.log(`[CONN] ${gameType}: server healthy, connecting socket...`);
-            await new Promise<void>((resolve, reject) => {
-                if (sock.connected) { resolve(); return; }
-                const t = setTimeout(() => reject(new Error(`socket_connect_timeout:${gameType}`)), 15_000);
-                sock.once('connect', () => { clearTimeout(t); console.log(`[CONN] ${gameType}: socket connected`); resolve(); });
-                sock.connect();
-            });
-        } finally {
+    const promise = new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => {
             connectingPromises.delete(gameType);
-        }
-    })();
+            pendingResolvers.delete(gameType);
+            console.log(`[CONN] ${gameType}: timeout — game server did not connect within 120s`);
+            reject(new Error(`socket_timeout:${gameType}`));
+        }, 120_000);
+
+        pendingResolvers.set(gameType, () => {
+            clearTimeout(timeout);
+            connectingPromises.delete(gameType);
+            console.log(`[CONN] ${gameType}: game server is ready`);
+            resolve();
+        });
+    });
 
     connectingPromises.set(gameType, promise);
     return promise;
 }
 
 export function preWarm(gameType: string): void {
-    const sock = GAME_SOCKETS[gameType];
-    if (sock?.connected) return;
-    ensureConnected(gameType).catch(() => { /* best-effort pre-warm */ });
+    // Game servers connect TO us when they wake — nothing to initiate from here.
+    // Just register interest so ensureConnected resolves quickly on lobby:start.
+    if (gameServerConnections.has(gameType)) return;
+    ensureConnected(gameType).catch(() => { /* best-effort */ });
 }
 
-// Called when the browser (different IP, not rate-limited) confirms the game server is awake.
-// Kick off a socket connection immediately instead of waiting for the next /health poll.
-export function notifyGameServerReady(gameType: string): void {
-    const sock = GAME_SOCKETS[gameType];
-    if (!sock || sock.connected) { console.log(`[CONN] ${gameType}: gameServerReady ignored (already connected)`); return; }
-    if (!connectingPromises.has(gameType)) { console.log(`[CONN] ${gameType}: gameServerReady ignored (no active wait)`); return; }
-    console.log(`[CONN] ${gameType}: browser confirmed awake, attempting socket connection now`);
-    sock.disconnect();
-    sock.connect();
-}
-
-// ── Configure senders (used on lobby:start + reconnect) ───────────────────────
+// ── Configure senders ─────────────────────────────────────────────────────────
 
 export function sendConfigure(gameType: string, lobbyId: string, lobby: any, onAck?: () => void): void {
+    const sock = gameServerConnections.get(gameType);
+    if (!sock) { console.log(`[CONF] ${gameType}: no connected game server`); return; }
+
     switch (gameType) {
         case 'uno': {
             const opts = lobby.unoOptions ?? { stackable: false, jumpIn: false, teamMode: 'none', teamWinMode: 'one' };
-            unoServerSocket.emit('uno:configure', { lobbyId, options: opts, expectedCount: lobby.players.size, preAssignedTeams: lobby.teams ? Object.fromEntries(lobby.teams) : null, botCount: lobby.bots ?? 0 }, onAck);
+            sock.emit('uno:configure', { lobbyId, options: opts, expectedCount: lobby.players.size, preAssignedTeams: lobby.teams ? Object.fromEntries(lobby.teams) : null, botCount: lobby.bots ?? 0 }, onAck);
             break;
         }
         case 'taboo': {
             const opts = lobby.tabooOptions ?? { turnDuration: 60, totalRounds: 3, trapWordCount: 5, maxAttempts: 10, trapDuration: 60 };
-            tabooServerSocket.emit('taboo:configure', { lobbyId, options: opts, teams: lobby.teams ? Object.fromEntries(lobby.teams) : null, orators: lobby.orators ?? { '0': null, '1': null }, hostId: lobby.hostId }, onAck);
+            sock.emit('taboo:configure', { lobbyId, options: opts, teams: lobby.teams ? Object.fromEntries(lobby.teams) : null, orators: lobby.orators ?? { '0': null, '1': null }, hostId: lobby.hostId }, onAck);
             break;
         }
         case 'skyjow': {
             const botsToSpawn = lobby.bots ?? 0;
             const humanPlayers = Array.from<any>(lobby.players.values());
             const botPlayers = Array.from({ length: botsToSpawn }, (_, i) => ({ userId: `bot-skyjow-${randomUUID()}`, username: botsToSpawn === 1 ? '🤖 Bot 1' : `🤖 Bot ${i + 1}` }));
-            skyjowServerSocket.emit('skyjow:configure', { lobbyId, players: [...humanPlayers, ...botPlayers], options: lobby.skyjowOptions ?? { eliminateRows: false } }, onAck);
+            sock.emit('skyjow:configure', { lobbyId, players: [...humanPlayers, ...botPlayers], options: lobby.skyjowOptions ?? { eliminateRows: false } }, onAck);
             break;
         }
         case 'yahtzee': {
             const botsToSpawn = lobby.bots ?? 0;
             const humanPlayers = Array.from<any>(lobby.players.values());
             const botPlayers = Array.from({ length: botsToSpawn }, (_, i) => ({ userId: `bot-yahtzee-${randomUUID()}`, username: `🤖 Bot ${i + 1}` }));
-            yahtzeeServerSocket.emit('yahtzee:configure', { lobbyId, players: [...humanPlayers, ...botPlayers] }, onAck);
+            sock.emit('yahtzee:configure', { lobbyId, players: [...humanPlayers, ...botPlayers] }, onAck);
             break;
         }
         case 'puissance4': {
             const botName = (lobby.bots ?? 0) > 0 ? '🤖 Bot 1' : undefined;
-            puissance4ServerSocket.emit('p4:configure', { lobbyId, botName }, onAck);
+            sock.emit('p4:configure', { lobbyId, botName }, onAck);
             break;
         }
         case 'just_one': {
-            justOneServerSocket.emit('just_one:configure', { lobbyId, players: Array.from<any>(lobby.players.values()) }, onAck);
+            sock.emit('just_one:configure', { lobbyId, players: Array.from<any>(lobby.players.values()) }, onAck);
             break;
         }
         case 'battleship': {
             const botName = (lobby.bots ?? 0) > 0 ? '🤖 Bot 1' : undefined;
-            battleshipServerSocket.emit('battleship:configure', { lobbyId, options: lobby.battleshipOptions ?? {}, botName }, onAck);
+            sock.emit('battleship:configure', { lobbyId, options: lobby.battleshipOptions ?? {}, botName }, onAck);
             break;
         }
         case 'diamant': {
             const botsToSpawn = lobby.bots ?? 0;
             const humanPlayers = Array.from(lobby.players.values());
             const botPlayers = Array.from({ length: botsToSpawn }, (_, i) => ({ userId: `bot-diamant-${randomUUID()}`, username: `🤖 Bot ${i + 1}` }));
-            diamantServerSocket.emit('diamant:configure', { lobbyId, players: [...humanPlayers, ...botPlayers], options: lobby.diamantOptions ?? { roundCount: 5 } }, onAck);
+            sock.emit('diamant:configure', { lobbyId, players: [...humanPlayers, ...botPlayers], options: lobby.diamantOptions ?? { roundCount: 5 } }, onAck);
             break;
         }
         case 'impostor': {
-            impostorServerSocket.emit('impostor:configure', { lobbyId, players: Array.from<any>(lobby.players.values()), expectedCount: lobby.players.size, options: lobby.impostorOptions ?? { rounds: 1 } }, onAck);
+            sock.emit('impostor:configure', { lobbyId, players: Array.from<any>(lobby.players.values()), expectedCount: lobby.players.size, options: lobby.impostorOptions ?? { rounds: 1 } }, onAck);
             break;
         }
         default: { // quiz
-            quizServerSocket.emit('quiz:configure', { lobbyId, quizId: lobby.quizId, players: Array.from<any>(lobby.players.values()), expectedCount: lobby.players.size, timeMode: lobby.timeMode, timePerQuestion: lobby.timePerQuestion }, onAck);
+            sock.emit('quiz:configure', { lobbyId, quizId: lobby.quizId, players: Array.from<any>(lobby.players.values()), expectedCount: lobby.players.size, timeMode: lobby.timeMode, timePerQuestion: lobby.timePerQuestion }, onAck);
             break;
         }
-    }
-}
-
-// ── Reconnect handlers: resend configure when a game server restarts ──────────
-
-export function setupReconnectHandlers(lobbies: Map<string, any>): void {
-    for (const [gameType, sock] of Object.entries(GAME_SOCKETS)) {
-        let isFirstConnect = true;
-        sock.on('connect', () => {
-            if (isFirstConnect) { isFirstConnect = false; return; }
-            for (const [lobbyId, lobby] of lobbies) {
-                if (lobby.status === 'PLAYING' && (lobby.gameType ?? 'quiz') === gameType) {
-                    sendConfigure(gameType, lobbyId, lobby);
-                }
-            }
-        });
     }
 }

@@ -1,7 +1,7 @@
 // lobby-server/src/handlers.ts
 import { randomUUID } from 'crypto';
 import { Server, Socket } from 'socket.io';
-import { GAME_SOCKETS, ensureConnected, preWarm, sendConfigure, notifyGameServerReady } from './gameServers';
+import { gameServerConnections, ensureConnected, preWarm, sendConfigure } from './gameServers';
 import { emitLobbyState, broadcastLobbies, removePlayerAndMaybeTransferHost } from './lobbyHelpers';
 
 const BOT_SUPPORTED_GAMES = new Set(['puissance4', 'yahtzee', 'diamant', 'battleship', 'uno', 'skyjow']);
@@ -362,13 +362,6 @@ export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string
         emitLobbyState(io, lobbyId, lobby);
     });
 
-    // ── Game server ready (browser confirmed health check passed) ─────────────
-
-    socket.on('lobby:gameServerReady', ({ gameType }) => {
-        console.log(`[CONN] gameServerReady received for ${gameType} from socket ${socket.id}`);
-        if (typeof gameType === 'string') notifyGameServerReady(gameType);
-    });
-
     // ── Start game ────────────────────────────────────────────────────────────
 
     socket.on('lobby:start', async () => {
@@ -380,15 +373,14 @@ export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string
         if (!canStart(lobby)) { console.log(`[START] abort: canStart=false for ${lobbyId} (${lobby.gameType}, ${lobby.players.size} players)`); return; }
 
         const gameType = lobby.gameType ?? 'quiz';
-        const targetSocket = GAME_SOCKETS[gameType];
 
         const doWake = async () => {
-            io.to(`lobby:${lobbyId}`).emit('lobby:server_warming', { estimatedSeconds: 40 });
+            io.to(`lobby:${lobbyId}`).emit('lobby:server_warming', { estimatedSeconds: 60 });
             await ensureConnected(gameType);
         };
 
-        // Step 1: wake if obviously disconnected
-        if (targetSocket && !targetSocket.connected) {
+        // Step 1: wait for game server to connect (it self-connects when it starts up)
+        if (!gameServerConnections.has(gameType)) {
             try {
                 await doWake();
             } catch {
@@ -408,14 +400,14 @@ export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string
             io.to(`lobby:${lobbyId}`).emit('game:start', fullPayload);
         };
 
-        // Step 2: send configure; if ack doesn't arrive in 8s the socket is stale → wake
+        // Step 2: send configure; if ack doesn't arrive in 8s, game server may have
+        // disconnected just after connecting — wait for it to reconnect and retry
         let done = false;
         const ackTimer = setTimeout(async () => {
             if (done) return;
             done = true;
             lobby.status = 'WAITING';
             emitLobbyState(io, lobbyId, lobby);
-            targetSocket?.disconnect();
             try {
                 await doWake();
             } catch {

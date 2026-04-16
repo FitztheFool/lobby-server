@@ -5,7 +5,7 @@ import cors from 'cors';
 import http from 'http';
 import { Server } from 'socket.io';
 import { corsConfig, setupSocketAuth } from '@kwizar/shared';
-import { initGameServers, setupReconnectHandlers, GAME_SERVER_URLS } from './gameServers';
+import { registerGameServer, GAME_SERVER_URLS } from './gameServers';
 import { registerHandlers } from './handlers';
 
 const app = express();
@@ -27,14 +27,19 @@ const server = http.createServer(app);
 const io = new Server(server, { cors: corsConfig, maxHttpBufferSize: 1e5 });
 
 const SOCKET_SECRET = new TextEncoder().encode(process.env.INTERNAL_API_KEY!);
-initGameServers(SOCKET_SECRET);
 
 const lobbies = new Map<string, any>();
-setupReconnectHandlers(lobbies);
 
 setupSocketAuth(io, SOCKET_SECRET);
 
 io.on('connection', (socket) => {
+    // Game servers connect here on startup with { token, gameType } in auth
+    const authGameType = socket.handshake.auth?.gameType as string | undefined;
+    if (authGameType && authGameType in GAME_SERVER_URLS) {
+        registerGameServer(authGameType, socket, lobbies);
+        return;
+    }
+    // Regular client connection
     console.log('nouvelle connexion lobby', socket.id);
     registerHandlers(io, socket, lobbies);
 });
