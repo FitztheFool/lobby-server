@@ -11,7 +11,7 @@ export function emitLobbyState(io: Server, lobbyId: string, lobby: any): void {
         players:         Array.from<any>(lobby.players.values()),
         gameType:        lobby.gameType ?? 'quiz',
         unoOptions:      lobby.unoOptions ?? { stackable: false, jumpIn: false, teamMode: 'none', teamWinMode: 'one' },
-        tabooOptions:    lobby.tabooOptions ?? { turnDuration: 60, totalRounds: 3, trapWordCount: 5, maxAttempts: 10, trapDuration: 60 },
+        tabooOptions:    lobby.tabooOptions ?? { turnDuration: 120, totalRounds: 3, trapWordCount: 5, maxAttempts: 10, trapDuration: 90 },
         teams:           lobby.teams ? Object.fromEntries(lobby.teams) : null,
         orators:         lobby.orators ?? { '0': null, '1': null },
         skyjowOptions:   lobby.skyjowOptions ?? { eliminateRows: false },

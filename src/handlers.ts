@@ -66,7 +66,7 @@ export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string
                 maxPlayers: (Number.isFinite(Number(maxPlayers)) && Number(maxPlayers) >= 2) ? Number(maxPlayers) : 8,
                 gameType: gt,
                 unoOptions:      { stackable: false, jumpIn: false, teamMode: 'none', teamWinMode: 'one' },
-                tabooOptions:    { turnDuration: 60, totalRounds: 3, trapWordCount: 5, maxAttempts: 10, trapDuration: 60 },
+                tabooOptions:    { turnDuration: 120, totalRounds: 3, trapWordCount: 5, maxAttempts: 10, trapDuration: 90 },
                 skyjowOptions:   { eliminateRows: false },
                 battleshipOptions: { gridSize: 10, ships: [5, 4, 3, 3, 2] },
                 diamantOptions:  { roundCount: 5 },
@@ -89,7 +89,7 @@ export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string
         lobby.teams             ||= null;
         lobby.orators           ||= { '0': null, '1': null };
         lobby.unoOptions        ||= { stackable: false, jumpIn: false, teamMode: 'none', teamWinMode: 'one' };
-        lobby.tabooOptions      ||= { turnDuration: 60, totalRounds: 3, trapWordCount: 5, maxAttempts: 10, trapDuration: 60 };
+        lobby.tabooOptions      ||= { turnDuration: 120, totalRounds: 3, trapWordCount: 5, maxAttempts: 10, trapDuration: 90 };
         lobby.skyjowOptions     ||= { eliminateRows: false };
         lobby.battleshipOptions ||= { gridSize: 10, ships: [5, 4, 3, 3, 2] };
         lobby.impostorOptions   ||= { rounds: 1, timePerRound: 60 };
@@ -290,7 +290,7 @@ export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string
         if (!lobbyId || !userId) return;
         const lobby = lobbies.get(lobbyId);
         if (!lobby || lobby.hostId !== userId) return;
-        lobby.tabooOptions ||= { turnDuration: 60, totalRounds: 3, trapWordCount: 5, maxAttempts: 10, trapDuration: 60 };
+        lobby.tabooOptions ||= { turnDuration: 120, totalRounds: 3, trapWordCount: 5, maxAttempts: 10, trapDuration: 90 };
         const td = Number(turnDuration); if (Number.isFinite(td) && td >= 15 && td <= 300) lobby.tabooOptions.turnDuration = td;
         const tr = Number(totalRounds);  if (Number.isFinite(tr) && tr >= 1  && tr <= 10)  lobby.tabooOptions.totalRounds  = tr;
         const tw = Number(trapWordCount); if (Number.isFinite(tw) && tw >= 1 && tw <= 10) lobby.tabooOptions.trapWordCount  = tw;
