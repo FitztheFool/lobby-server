@@ -24,6 +24,7 @@ app.get('/warmup/:gameType', cors(), async (req, res) => {
 });
 
 const server = http.createServer(app);
+server.setMaxListeners(50);
 const io = new Server(server, { cors: corsConfig, maxHttpBufferSize: 1e5 });
 
 const SOCKET_SECRET = new TextEncoder().encode(process.env.INTERNAL_API_KEY!);
