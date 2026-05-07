@@ -320,14 +320,15 @@ export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string
         emitLobbyState(io, lobbyId, lobby);
     });
 
-    socket.on('lobby:setImpostorOptions', ({ rounds, timePerRound }) => {
+    socket.on('lobby:setImpostorOptions', ({ rounds, timePerRound, misterWhite }) => {
         const { lobbyId, userId } = socket.data || {};
         if (!lobbyId || !userId) return;
         const lobby = lobbies.get(lobbyId);
         if (!lobby || lobby.hostId !== userId) return;
-        lobby.impostorOptions ||= { rounds: 1, timePerRound: 60 };
+        lobby.impostorOptions ||= { rounds: 1, timePerRound: 60, misterWhite: false };
         const r = Number(rounds);      if (Number.isFinite(r) && r >= 1  && r <= 5)   lobby.impostorOptions.rounds      = r;
         const t = Number(timePerRound); if (Number.isFinite(t) && t >= 30 && t <= 120) lobby.impostorOptions.timePerRound = t;
+        if (typeof misterWhite === 'boolean') lobby.impostorOptions.misterWhite = misterWhite;
         emitLobbyState(io, lobbyId, lobby);
     });
 
