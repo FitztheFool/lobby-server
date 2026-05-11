@@ -27,16 +27,21 @@ const server = http.createServer(app);
 server.setMaxListeners(50);
 const io = new Server(server, { cors: corsConfig, maxHttpBufferSize: 1e5 });
 
-const SOCKET_SECRET = new TextEncoder().encode(process.env.INTERNAL_API_KEY!);
+const SOCKET_USER_SECRET = new TextEncoder().encode((process.env.SOCKET_USER_SECRET ?? process.env.INTERNAL_API_KEY)!);
+const SOCKET_SERVICE_SECRET = new TextEncoder().encode(process.env.INTERNAL_API_KEY!);
 
 const lobbies = new Map<string, any>();
 
-setupSocketAuth(io, SOCKET_SECRET);
+setupSocketAuth(io, { user: SOCKET_USER_SECRET, service: SOCKET_SERVICE_SECRET } as any);
 
 io.on('connection', (socket) => {
     // Game servers connect here on startup with { token, gameType } in auth
     const authGameType = socket.handshake.auth?.gameType as string | undefined;
     if (authGameType && authGameType in GAME_SERVER_URLS) {
+        if (socket.data.authKind !== 'service') {
+            socket.disconnect(true);
+            return;
+        }
         registerGameServer(authGameType, socket, lobbies);
         return;
     }
@@ -48,6 +53,12 @@ io.on('connection', (socket) => {
 const PORT = process.env.PORT || 10000;
 server.listen(PORT, () => console.log('[LOBBY] realtime listening on', PORT));
 
-const shutdown = () => server.close(() => process.exit(0));
-process.on('SIGTERM', shutdown);
-process.on('SIGINT', shutdown);
+const shutdown = () => {
+    io.close(() => {
+        server.close(() => process.exit(0));
+    });
+    setTimeout(() => process.exit(1), 3000).unref();
+};
+
+process.on("SIGTERM", shutdown);
+process.on("SIGINT", shutdown);
