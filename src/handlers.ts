@@ -2,7 +2,7 @@
 import { randomUUID } from 'crypto';
 import { Server, Socket } from 'socket.io';
 import { gameServerConnections, ensureConnected, preWarm, sendConfigure, GAME_SERVER_URLS } from './gameServers';
-import { emitLobbyState, broadcastLobbies, removePlayerAndMaybeTransferHost } from './lobbyHelpers';
+import { emitLobbyState, broadcastLobbies, removePlayerAndMaybeTransferHost, autoFillBotTeams } from './lobbyHelpers';
 
 const BOT_SUPPORTED_GAMES = new Set(['puissance4', 'yahtzee', 'diamant', 'battleship', 'uno', 'skyjow', 'ludo']);
 
@@ -31,7 +31,7 @@ function canStart(lobby: any): boolean {
         if (t0 < 2 || t1 < 2) return false;
     }
     if (g === 'uno' && lobby.unoOptions?.teamMode === '2v2') {
-        if (lobby.players.size !== 4) return false;
+        if (total !== 4) return false;
         if (!lobby.teams || lobby.teams.size !== 4) return false;
         const t0 = Array.from<number>(lobby.teams.values()).filter(t => t === 0).length;
         const t1 = Array.from<number>(lobby.teams.values()).filter(t => t === 1).length;
@@ -40,7 +40,7 @@ function canStart(lobby: any): boolean {
     if (g === 'ludo') {
         if (total < 2 || total > 4) return false;
         if (lobby.ludoOptions?.teamMode === '2v2') {
-            if (total !== 4 || lobby.players.size !== 4) return false;
+            if (total !== 4) return false;
             if (!lobby.teams || lobby.teams.size !== 4) return false;
             const t0 = Array.from<number>(lobby.teams.values()).filter(t => t === 0).length;
             const t1 = Array.from<number>(lobby.teams.values()).filter(t => t === 1).length;
@@ -110,6 +110,7 @@ export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string
         lobby.resultViewers     ||= new Set();
         lobby.members           ||= new Set<string>();
         lobby.teams             ||= null;
+        lobby.botSlots          ||= [];
 
         // Trace persistante de l'appartenance — survit aux disconnect/reconnect.
         lobby.members.add(userId);
@@ -253,6 +254,7 @@ export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string
         if (!VALID_GAME_TYPES.includes(gameType)) return;
         lobby.gameType = gameType;
         lobby.bots = 0;
+        lobby.botSlots = [];
         if (gameType !== 'quiz') lobby.quizId = null;
         lobby.maxPlayers = DEFAULT_MAX_PLAYERS[gameType] ?? 8;
         if (gameType === 'uno' && lobby.unoOptions?.teamMode === '2v2') lobby.maxPlayers = 4;
@@ -267,8 +269,12 @@ export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string
         const lobby = lobbies.get(lobbyId);
         if (!lobby || lobby.hostId !== userId) return;
         if (!BOT_SUPPORTED_GAMES.has(lobby.gameType)) return;
-        if (lobby.players.size + (lobby.bots ?? 0) >= (lobby.maxPlayers ?? 2)) return;
-        lobby.bots = (lobby.bots ?? 0) + 1;
+        lobby.botSlots ||= [];
+        if (lobby.players.size + lobby.botSlots.length >= (lobby.maxPlayers ?? 2)) return;
+        const slotNumber = lobby.botSlots.length + 1;
+        lobby.botSlots.push({ userId: `bot-${lobby.gameType}-${randomUUID()}`, username: `🤖 Bot ${slotNumber}` });
+        lobby.bots = lobby.botSlots.length;
+        autoFillBotTeams(lobby);
         emitLobbyState(io, lobbyId, lobby);
     });
 
@@ -276,8 +282,13 @@ export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string
         const { lobbyId, userId } = socket.data || {};
         if (!lobbyId || !userId) return;
         const lobby = lobbies.get(lobbyId);
-        if (!lobby || lobby.hostId !== userId || !lobby.bots || lobby.bots <= 0) return;
-        lobby.bots -= 1;
+        if (!lobby || lobby.hostId !== userId) return;
+        lobby.botSlots ||= [];
+        if (lobby.botSlots.length === 0) return;
+        const removed = lobby.botSlots.pop();
+        if (removed && lobby.teams) lobby.teams.delete(removed.userId);
+        lobby.bots = lobby.botSlots.length;
+        autoFillBotTeams(lobby);
         emitLobbyState(io, lobbyId, lobby);
     });
 
@@ -395,6 +406,7 @@ export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string
         if (!lobby.teams) lobby.teams = new Map();
         if (lobby.teams.get(userId) === teamNum) lobby.teams.delete(userId);
         else lobby.teams.set(userId, teamNum);
+        autoFillBotTeams(lobby);
         emitLobbyState(io, lobbyId, lobby);
     });
 
@@ -403,14 +415,16 @@ export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string
         if (!lobbyId || !userId) return;
         const lobby = lobbies.get(lobbyId);
         if (!lobby || lobby.hostId !== userId) return;
-        const players = Array.from(lobby.players.keys()).sort(() => Math.random() - 0.5);
-        const half = Math.floor(players.length / 2);
+        const humanIds = Array.from(lobby.players.keys());
+        const botIds = (lobby.botSlots ?? []).map((b: { userId: string }) => b.userId);
+        const ids = [...humanIds, ...botIds].sort(() => Math.random() - 0.5);
+        const half = Math.floor(ids.length / 2);
         lobby.teams = new Map();
-        players.forEach((id, i) => lobby.teams.set(id, i < half ? 0 : 1));
+        ids.forEach((id, i) => lobby.teams.set(id, i < half ? 0 : 1));
         if (lobby.gameType === 'taboo') {
             lobby.orators ||= { '0': null, '1': null };
-            const t0 = players.filter((_, i) => i < half);
-            const t1 = players.filter((_, i) => i >= half);
+            const t0 = ids.filter((_, i) => i < half);
+            const t1 = ids.filter((_, i) => i >= half);
             lobby.orators['0'] = t0[Math.floor(Math.random() * t0.length)] ?? null;
             lobby.orators['1'] = t1[Math.floor(Math.random() * t1.length)] ?? null;
         }

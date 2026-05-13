@@ -3,7 +3,6 @@
 // The lobby-server no longer initiates outbound connections to sleeping Render services,
 // which eliminates the 429 rate-limiting issue entirely.
 import 'dotenv/config';
-import { randomUUID } from 'crypto';
 
 // ── Game server URLs (used by /warmup proxy endpoint only) ────────────────────
 
@@ -101,7 +100,8 @@ export function sendConfigure(gameType: string, lobbyId: string, lobby: any, onA
     switch (gameType) {
         case 'uno': {
             const opts = lobby.unoOptions ?? { stackable: false, jumpIn: false, teamMode: 'none', teamWinMode: 'one' };
-            sock.emit('uno:configure', { lobbyId, options: opts, expectedCount: lobby.players.size, preAssignedTeams: lobby.teams ? Object.fromEntries(lobby.teams) : null, botCount: lobby.bots ?? 0 }, onAck);
+            const bots = (lobby.botSlots ?? []) as Array<{ userId: string; username: string }>;
+            sock.emit('uno:configure', { lobbyId, options: opts, expectedCount: lobby.players.size, preAssignedTeams: lobby.teams ? Object.fromEntries(lobby.teams) : null, botCount: bots.length, bots }, onAck);
             break;
         }
         case 'taboo': {
@@ -110,16 +110,14 @@ export function sendConfigure(gameType: string, lobbyId: string, lobby: any, onA
             break;
         }
         case 'skyjow': {
-            const botsToSpawn = lobby.bots ?? 0;
             const humanPlayers = Array.from<any>(lobby.players.values());
-            const botPlayers = Array.from({ length: botsToSpawn }, (_, i) => ({ userId: `bot-skyjow-${randomUUID()}`, username: botsToSpawn === 1 ? '🤖 Bot 1' : `🤖 Bot ${i + 1}` }));
+            const botPlayers = (lobby.botSlots ?? []) as Array<{ userId: string; username: string }>;
             sock.emit('skyjow:configure', { lobbyId, players: [...humanPlayers, ...botPlayers], options: lobby.skyjowOptions ?? { eliminateRows: false } }, onAck);
             break;
         }
         case 'yahtzee': {
-            const botsToSpawn = lobby.bots ?? 0;
             const humanPlayers = Array.from<any>(lobby.players.values());
-            const botPlayers = Array.from({ length: botsToSpawn }, (_, i) => ({ userId: `bot-yahtzee-${randomUUID()}`, username: `🤖 Bot ${i + 1}` }));
+            const botPlayers = (lobby.botSlots ?? []) as Array<{ userId: string; username: string }>;
             sock.emit('yahtzee:configure', { lobbyId, players: [...humanPlayers, ...botPlayers] }, onAck);
             break;
         }
@@ -138,9 +136,8 @@ export function sendConfigure(gameType: string, lobbyId: string, lobby: any, onA
             break;
         }
         case 'diamant': {
-            const botsToSpawn = lobby.bots ?? 0;
             const humanPlayers = Array.from(lobby.players.values());
-            const botPlayers = Array.from({ length: botsToSpawn }, (_, i) => ({ userId: `bot-diamant-${randomUUID()}`, username: `🤖 Bot ${i + 1}` }));
+            const botPlayers = (lobby.botSlots ?? []) as Array<{ userId: string; username: string }>;
             sock.emit('diamant:configure', { lobbyId, players: [...humanPlayers, ...botPlayers], options: lobby.diamantOptions ?? { roundCount: 5 } }, onAck);
             break;
         }
@@ -149,9 +146,8 @@ export function sendConfigure(gameType: string, lobbyId: string, lobby: any, onA
             break;
         }
         case 'ludo': {
-            const botsToSpawn = lobby.bots ?? 0;
             const humanPlayers = Array.from<any>(lobby.players.values());
-            const botPlayers = Array.from({ length: botsToSpawn }, (_, i) => ({ userId: `bot-ludo-${randomUUID()}`, username: `🤖 Bot ${i + 1}` }));
+            const botPlayers = (lobby.botSlots ?? []) as Array<{ userId: string; username: string }>;
             sock.emit('ludo:configure', {
                 lobbyId,
                 players: [...humanPlayers, ...botPlayers],
