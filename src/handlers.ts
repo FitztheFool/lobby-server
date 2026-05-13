@@ -4,12 +4,12 @@ import { Server, Socket } from 'socket.io';
 import { gameServerConnections, ensureConnected, preWarm, sendConfigure, GAME_SERVER_URLS } from './gameServers';
 import { emitLobbyState, broadcastLobbies, removePlayerAndMaybeTransferHost } from './lobbyHelpers';
 
-const BOT_SUPPORTED_GAMES = new Set(['puissance4', 'yahtzee', 'diamant', 'battleship', 'uno', 'skyjow']);
+const BOT_SUPPORTED_GAMES = new Set(['puissance4', 'yahtzee', 'diamant', 'battleship', 'uno', 'skyjow', 'ludo']);
 
-const VALID_GAME_TYPES = ['quiz', 'uno', 'taboo', 'skyjow', 'yahtzee', 'puissance4', 'just_one', 'battleship', 'diamant', 'impostor'];
+const VALID_GAME_TYPES = ['quiz', 'uno', 'taboo', 'skyjow', 'yahtzee', 'puissance4', 'just_one', 'battleship', 'diamant', 'impostor', 'ludo'];
 
 const DEFAULT_MAX_PLAYERS: Record<string, number> = {
-    quiz: 30, puissance4: 2, battleship: 2, diamant: 8, impostor: 8, just_one: 7,
+    quiz: 30, puissance4: 2, battleship: 2, diamant: 8, impostor: 8, just_one: 7, ludo: 4,
 };
 
 function canStart(lobby: any): boolean {
@@ -23,6 +23,7 @@ function canStart(lobby: any): boolean {
     if (g === 'just_one' && lobby.players.size < 3) return false;
     if (g === 'diamant' && (lobby.players.size < 1 || total < 2 || total > 8)) return false;
     if (g === 'impostor' && lobby.players.size < 4) return false;
+    if (g === 'ludo' && (lobby.players.size < 1 || total < 2 || total > 4)) return false;
     if (g === 'taboo') {
         if (!lobby.teams || lobby.teams.size < 4) return false;
         const t0 = Array.from<number>(lobby.teams.values()).filter(t => t === 0).length;
@@ -36,6 +37,16 @@ function canStart(lobby: any): boolean {
         const t1 = Array.from<number>(lobby.teams.values()).filter(t => t === 1).length;
         if (t0 !== 2 || t1 !== 2) return false;
     }
+    if (g === 'ludo') {
+        if (total < 2 || total > 4) return false;
+        if (lobby.ludoOptions?.teamMode === '2v2') {
+            if (total !== 4 || lobby.players.size !== 4) return false;
+            if (!lobby.teams || lobby.teams.size !== 4) return false;
+            const t0 = Array.from<number>(lobby.teams.values()).filter(t => t === 0).length;
+            const t1 = Array.from<number>(lobby.teams.values()).filter(t => t === 1).length;
+            if (t0 !== 2 || t1 !== 2) return false;
+        }
+    }
     return true;
 }
 
@@ -45,10 +56,19 @@ export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string
         const { userId, username } = socket.data;
         if (!lobbyId || !userId || !username) return;
 
+        const existing = lobbies.get(lobbyId);
+        // Lobbies privés : pendant qu'une partie est en cours, seuls les membres déjà
+        // enregistrés peuvent rejoindre (anti-intrusion mid-game). Les nouveaux peuvent
+        // toujours rejoindre via l'URL tant que le lobby est en WAITING.
+        if (existing && existing.isPublic === false && existing.status !== 'WAITING' && !existing.members?.has(userId)) {
+            socket.emit('lobby:accessDenied', { lobbyId });
+            return;
+        }
+
         socket.data.lobbyId = lobbyId;
         socket.join(`lobby:${lobbyId}`);
 
-        let lobby = lobbies.get(lobbyId);
+        let lobby = existing;
         if (!lobby) {
             const gt = VALID_GAME_TYPES.includes(gameType) ? gameType : 'uno';
             lobby = {
@@ -65,12 +85,14 @@ export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string
                 description: description ?? '',
                 maxPlayers: (Number.isFinite(Number(maxPlayers)) && Number(maxPlayers) >= 2) ? Number(maxPlayers) : 8,
                 gameType: gt,
+                members: new Set<string>(),
                 unoOptions:      { stackable: false, jumpIn: false, teamMode: 'none', teamWinMode: 'one' },
                 tabooOptions:    { turnDuration: 120, totalRounds: 3, trapWordCount: 5, maxAttempts: 10, trapDuration: 90 },
                 skyjowOptions:   { eliminateRows: false },
                 battleshipOptions: { gridSize: 10, ships: [5, 4, 3, 3, 2] },
                 diamantOptions:  { roundCount: 5 },
                 impostorOptions: { rounds: 1, timePerRound: 60 },
+                ludoOptions: { pawnExit: '6', bonusOn6: 'unlimited', winMode: 'first_done', teamMode: 'none' },
                 orators: { '0': null, '1': null },
             };
         }
@@ -86,13 +108,18 @@ export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string
         // Ensure defaults on older lobby objects
         lobby.hostId            ||= userId;
         lobby.resultViewers     ||= new Set();
+        lobby.members           ||= new Set<string>();
         lobby.teams             ||= null;
+
+        // Trace persistante de l'appartenance — survit aux disconnect/reconnect.
+        lobby.members.add(userId);
         lobby.orators           ||= { '0': null, '1': null };
         lobby.unoOptions        ||= { stackable: false, jumpIn: false, teamMode: 'none', teamWinMode: 'one' };
         lobby.tabooOptions      ||= { turnDuration: 120, totalRounds: 3, trapWordCount: 5, maxAttempts: 10, trapDuration: 90 };
         lobby.skyjowOptions     ||= { eliminateRows: false };
         lobby.battleshipOptions ||= { gridSize: 10, ships: [5, 4, 3, 3, 2] };
         lobby.impostorOptions   ||= { rounds: 1, timePerRound: 60 };
+        lobby.ludoOptions       ||= { pawnExit: '6', bonusOn6: 'unlimited', winMode: 'first_done', teamMode: 'none' };
 
         lobbies.set(lobbyId, lobby);
         emitLobbyState(io, lobbyId, lobby);
@@ -116,11 +143,16 @@ export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string
     });
 
     socket.on('chat:joinTeam', ({ team }) => {
-        const { lobbyId } = socket.data || {};
-        if (!lobbyId) return;
+        const { lobbyId, userId } = socket.data || {};
+        if (!lobbyId || !userId) return;
+        const lobby = lobbies.get(lobbyId);
+        if (!lobby) return;
         socket.leave(`lobby:${lobbyId}:team:0`);
         socket.leave(`lobby:${lobbyId}:team:1`);
-        if (team === 0 || team === 1) socket.join(`lobby:${lobbyId}:team:${team}`);
+        if (team !== 0 && team !== 1) return;
+        // Empêche un membre du lobby de subscribe au chat d'une équipe à laquelle il n'appartient pas.
+        if (lobby.teams?.get(userId) !== team) return;
+        socket.join(`lobby:${lobbyId}:team:${team}`);
     });
 
     // ── Lobby management ──────────────────────────────────────────────────────
@@ -156,6 +188,9 @@ export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string
     socket.on('lobby:leave', () => {
         const { lobbyId, userId } = socket.data || {};
         if (!lobbyId || !userId) return;
+        const lobby = lobbies.get(lobbyId);
+        // Départ explicite → retire aussi des members (ne pourra rejoindre que via réinvitation/public).
+        lobby?.members?.delete(userId);
         removePlayerAndMaybeTransferHost(io, lobbies, lobbyId, userId);
     });
 
@@ -171,6 +206,7 @@ export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string
             }
         }
         lobby.players.delete(targetUserId);
+        lobby.members?.delete(targetUserId);
         if (lobby.teams) lobby.teams.delete(targetUserId);
         if (lobby.players.size === 0) { lobbies.delete(lobbyId); return; }
         emitLobbyState(io, lobbyId, lobby);
@@ -220,6 +256,7 @@ export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string
         if (gameType !== 'quiz') lobby.quizId = null;
         lobby.maxPlayers = DEFAULT_MAX_PLAYERS[gameType] ?? 8;
         if (gameType === 'uno' && lobby.unoOptions?.teamMode === '2v2') lobby.maxPlayers = 4;
+        if (gameType === 'ludo' && lobby.ludoOptions?.teamMode === '2v2') lobby.maxPlayers = 4;
         emitLobbyState(io, lobbyId, lobby);
         broadcastLobbies(io, lobbies);
     });
@@ -317,6 +354,23 @@ export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string
         lobby.battleshipOptions ||= { gridSize: 10, ships: [5, 4, 3, 3, 2] };
         const g = Number(gridSize); if (Number.isFinite(g) && g >= 8 && g <= 15) lobby.battleshipOptions.gridSize = g;
         const t = Number(turnTime); if (Number.isFinite(t) && t >= 10 && t <= 120) lobby.battleshipOptions.turnTime = t;
+        emitLobbyState(io, lobbyId, lobby);
+    });
+
+    socket.on('lobby:setLudoOptions', ({ pawnExit, bonusOn6, winMode, teamMode }) => {
+        const { lobbyId, userId } = socket.data || {};
+        if (!lobbyId || !userId) return;
+        const lobby = lobbies.get(lobbyId);
+        if (!lobby || lobby.hostId !== userId) return;
+        lobby.ludoOptions ||= { pawnExit: '6', bonusOn6: 'unlimited', winMode: 'first_done', teamMode: 'none' };
+        if (pawnExit === '6' || pawnExit === '6_or_1' || pawnExit === 'any') lobby.ludoOptions.pawnExit = pawnExit;
+        if (bonusOn6 === 'unlimited' || bonusOn6 === 'triple_lose' || bonusOn6 === 'none') lobby.ludoOptions.bonusOn6 = bonusOn6;
+        if (winMode === 'first_done' || winMode === 'full_ranking') lobby.ludoOptions.winMode = winMode;
+        if (teamMode === 'none' || teamMode === '2v2') {
+            lobby.ludoOptions.teamMode = teamMode;
+            lobby.teams = teamMode === '2v2' ? new Map() : null;
+            if (lobby.gameType === 'ludo') lobby.maxPlayers = 4;
+        }
         emitLobbyState(io, lobbyId, lobby);
     });
 

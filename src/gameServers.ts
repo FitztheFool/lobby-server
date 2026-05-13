@@ -18,6 +18,7 @@ export const GAME_SERVER_URLS: Record<string, string> = {
     battleship: process.env.BATTLESHIP_SERVER_URL ?? 'http://localhost:10008',
     diamant:    process.env.DIAMANT_SERVER_URL    ?? 'http://localhost:10009',
     impostor:   process.env.IMPOSTOR_SERVER_URL   ?? 'http://localhost:10010',
+    ludo:       process.env.LUDO_SERVER_URL       ?? 'http://localhost:10011',
 };
 
 // ── Inbound game server connections ───────────────────────────────────────────
@@ -145,6 +146,18 @@ export function sendConfigure(gameType: string, lobbyId: string, lobby: any, onA
         }
         case 'impostor': {
             sock.emit('impostor:configure', { lobbyId, players: Array.from<any>(lobby.players.values()), expectedCount: lobby.players.size, options: lobby.impostorOptions ?? { rounds: 1 } }, onAck);
+            break;
+        }
+        case 'ludo': {
+            const botsToSpawn = lobby.bots ?? 0;
+            const humanPlayers = Array.from<any>(lobby.players.values());
+            const botPlayers = Array.from({ length: botsToSpawn }, (_, i) => ({ userId: `bot-ludo-${randomUUID()}`, username: `🤖 Bot ${i + 1}` }));
+            sock.emit('ludo:configure', {
+                lobbyId,
+                players: [...humanPlayers, ...botPlayers],
+                options: lobby.ludoOptions ?? { pawnExit: '6', bonusOn6: 'unlimited', winMode: 'first_done', teamMode: 'none' },
+                teams: lobby.teams ? Object.fromEntries(lobby.teams) : null,
+            }, onAck);
             break;
         }
         default: { // quiz
