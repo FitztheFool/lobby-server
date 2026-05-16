@@ -276,6 +276,7 @@ export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string
         lobby.bots = lobby.botSlots.length;
         autoFillBotTeams(lobby);
         emitLobbyState(io, lobbyId, lobby);
+        broadcastLobbies(io, lobbies);
     });
 
     socket.on('lobby:removeBot', () => {
@@ -290,6 +291,7 @@ export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string
         lobby.bots = lobby.botSlots.length;
         autoFillBotTeams(lobby);
         emitLobbyState(io, lobbyId, lobby);
+        broadcastLobbies(io, lobbies);
     });
 
     socket.on('lobby:setQuiz', ({ quizId }) => {
@@ -514,10 +516,13 @@ export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string
                 description:    lobby.description ?? '',
                 gameType:       lobby.gameType ?? 'quiz',
                 maxPlayers:     lobby.maxPlayers ?? 8,
-                currentPlayers: lobby.players.size,
+                currentPlayers: lobby.players.size + (lobby.bots ?? 0),
                 status:         lobby.status === 'WAITING' ? 'waiting' : 'in-progress',
                 host:           Array.from<any>(lobby.players.values()).find((p: any) => p.userId === lobby.hostId)?.username ?? '?',
-                playerNames:    Array.from<any>(lobby.players.values()).map((p: any) => p.username),
+                playerNames:    [
+                    ...Array.from<any>(lobby.players.values()).map((p: any) => p.username),
+                    ...(lobby.botSlots ?? []).map((b: any) => b.username),
+                ],
             }));
         socket.emit('lobbies', lobbyList);
     });
