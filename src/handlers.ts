@@ -2,7 +2,7 @@
 import { randomUUID } from 'crypto';
 import { Server, Socket } from 'socket.io';
 import { gameServerConnections, ensureConnected, preWarm, sendConfigure, GAME_SERVER_URLS } from './gameServers';
-import { emitLobbyState, broadcastLobbies, removePlayerAndMaybeTransferHost, autoFillBotTeams } from './lobbyHelpers';
+import { emitLobbyState, broadcastLobbies, buildLobbyList, removePlayerAndMaybeTransferHost, autoFillBotTeams } from './lobbyHelpers';
 
 const BOT_SUPPORTED_GAMES = new Set(['puissance4', 'yahtzee', 'diamant', 'battleship', 'uno', 'skyjow', 'ludo']);
 
@@ -37,18 +37,46 @@ function canStart(lobby: any): boolean {
         const t1 = Array.from<number>(lobby.teams.values()).filter(t => t === 1).length;
         if (t0 !== 2 || t1 !== 2) return false;
     }
-    if (g === 'ludo') {
-        if (total < 2 || total > 4) return false;
-        if (lobby.ludoOptions?.teamMode === '2v2') {
-            if (total !== 4) return false;
-            if (!lobby.teams || lobby.teams.size !== 4) return false;
-            const t0 = Array.from<number>(lobby.teams.values()).filter(t => t === 0).length;
-            const t1 = Array.from<number>(lobby.teams.values()).filter(t => t === 1).length;
-            if (t0 !== 2 || t1 !== 2) return false;
-        }
+    if (g === 'ludo' && lobby.ludoOptions?.teamMode === '2v2') {
+        if (total !== 4) return false;
+        if (!lobby.teams || lobby.teams.size !== 4) return false;
+        const t0 = Array.from<number>(lobby.teams.values()).filter(t => t === 0).length;
+        const t1 = Array.from<number>(lobby.teams.values()).filter(t => t === 1).length;
+        if (t0 !== 2 || t1 !== 2) return false;
     }
     return true;
 }
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function getLobby(socket: Socket, lobbies: Map<string, any>): { lobbyId: string; userId: string; lobby: any } | null {
+    const { lobbyId, userId } = socket.data || {};
+    if (!lobbyId || !userId) return null;
+    const lobby = lobbies.get(lobbyId);
+    if (!lobby) return null;
+    return { lobbyId, userId, lobby };
+}
+
+function getHostLobby(socket: Socket, lobbies: Map<string, any>): { lobbyId: string; userId: string; lobby: any } | null {
+    const ctx = getLobby(socket, lobbies);
+    if (!ctx || ctx.lobby.hostId !== ctx.userId) return null;
+    return ctx;
+}
+
+// Validate and return a numeric value within [min, max], or undefined if invalid
+function numOpt(v: unknown, min: number, max: number): number | undefined {
+    const n = Number(v);
+    return Number.isFinite(n) && n >= min && n <= max ? n : undefined;
+}
+
+// Apply a team-mode change to lobby (shared between uno and ludo)
+function applyTeamMode(lobby: any, optionsKey: string, teamMode: unknown): void {
+    if (teamMode !== 'none' && teamMode !== '2v2') return;
+    lobby[optionsKey].teamMode = teamMode;
+    lobby.teams = teamMode === '2v2' ? new Map() : null;
+}
+
+// ── Register handlers ─────────────────────────────────────────────────────────
 
 export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string, any>): void {
 
@@ -57,9 +85,6 @@ export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string
         if (!lobbyId || !userId || !username) return;
 
         const existing = lobbies.get(lobbyId);
-        // Lobbies privés : pendant qu'une partie est en cours, seuls les membres déjà
-        // enregistrés peuvent rejoindre (anti-intrusion mid-game). Les nouveaux peuvent
-        // toujours rejoindre via l'URL tant que le lobby est en WAITING.
         if (existing && existing.isPublic === false && existing.status !== 'WAITING' && !existing.members?.has(userId)) {
             socket.emit('lobby:accessDenied', { lobbyId });
             return;
@@ -105,14 +130,11 @@ export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string
             lobby.players.set(userId, { userId, username });
         }
 
-        // Ensure defaults on older lobby objects
         lobby.hostId            ||= userId;
         lobby.resultViewers     ||= new Set();
         lobby.members           ||= new Set<string>();
         lobby.teams             ||= null;
         lobby.botSlots          ||= [];
-
-        // Trace persistante de l'appartenance — survit aux disconnect/reconnect.
         lobby.members.add(userId);
         lobby.orators           ||= { '0': null, '1': null };
         lobby.unoOptions        ||= { stackable: false, jumpIn: false, teamMode: 'none', teamWinMode: 'one' };
@@ -144,25 +166,21 @@ export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string
     });
 
     socket.on('chat:joinTeam', ({ team }) => {
-        const { lobbyId, userId } = socket.data || {};
-        if (!lobbyId || !userId) return;
-        const lobby = lobbies.get(lobbyId);
-        if (!lobby) return;
-        socket.leave(`lobby:${lobbyId}:team:0`);
-        socket.leave(`lobby:${lobbyId}:team:1`);
+        const ctx = getLobby(socket, lobbies);
+        if (!ctx) return;
+        socket.leave(`lobby:${ctx.lobbyId}:team:0`);
+        socket.leave(`lobby:${ctx.lobbyId}:team:1`);
         if (team !== 0 && team !== 1) return;
-        // Empêche un membre du lobby de subscribe au chat d'une équipe à laquelle il n'appartient pas.
-        if (lobby.teams?.get(userId) !== team) return;
-        socket.join(`lobby:${lobbyId}:team:${team}`);
+        if (ctx.lobby.teams?.get(ctx.userId) !== team) return;
+        socket.join(`lobby:${ctx.lobbyId}:team:${team}`);
     });
 
     // ── Lobby management ──────────────────────────────────────────────────────
 
     socket.on('lobby:setMeta', ({ title, description, maxPlayers, isPublic }) => {
-        const { lobbyId, userId } = socket.data || {};
-        if (!lobbyId || !userId) return;
-        const lobby = lobbies.get(lobbyId);
-        if (!lobby || lobby.hostId !== userId) return;
+        const ctx = getHostLobby(socket, lobbies);
+        if (!ctx) return;
+        const { lobbyId, lobby } = ctx;
         if (title && typeof title === 'string') lobby.title = title.slice(0, 60);
         if (typeof description === 'string') lobby.description = description.slice(0, 200);
         if (Number.isFinite(Number(maxPlayers)) && Number(maxPlayers) >= 2) lobby.maxPlayers = Number(maxPlayers);
@@ -187,19 +205,16 @@ export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string
     });
 
     socket.on('lobby:leave', () => {
-        const { lobbyId, userId } = socket.data || {};
-        if (!lobbyId || !userId) return;
-        const lobby = lobbies.get(lobbyId);
-        // Départ explicite → retire aussi des members (ne pourra rejoindre que via réinvitation/public).
-        lobby?.members?.delete(userId);
-        removePlayerAndMaybeTransferHost(io, lobbies, lobbyId, userId);
+        const ctx = getLobby(socket, lobbies);
+        if (!ctx) return;
+        ctx.lobby.members?.delete(ctx.userId);
+        removePlayerAndMaybeTransferHost(io, lobbies, ctx.lobbyId, ctx.userId);
     });
 
     socket.on('lobby:kick', ({ targetUserId }) => {
-        const { lobbyId, userId } = socket.data || {};
-        if (!lobbyId || !userId || !targetUserId) return;
-        const lobby = lobbies.get(lobbyId);
-        if (!lobby || lobby.hostId !== userId || targetUserId === userId) return;
+        const ctx = getHostLobby(socket, lobbies);
+        if (!ctx || !targetUserId || targetUserId === ctx.userId) return;
+        const { lobbyId, lobby } = ctx;
         if (!lobby.players.has(targetUserId)) return;
         for (const [, s] of io.of('/').sockets) {
             if (s.data?.userId === targetUserId && s.data?.lobbyId === lobbyId) {
@@ -215,10 +230,9 @@ export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string
     });
 
     socket.on('lobby:transferHost', ({ targetUserId }) => {
-        const { lobbyId, userId } = socket.data || {};
-        if (!lobbyId || !userId || !targetUserId) return;
-        const lobby = lobbies.get(lobbyId);
-        if (!lobby || lobby.hostId !== userId || targetUserId === userId) return;
+        const ctx = getHostLobby(socket, lobbies);
+        if (!ctx || !targetUserId || targetUserId === ctx.userId) return;
+        const { lobbyId, lobby } = ctx;
         if (!lobby.players.has(targetUserId)) return;
         lobby.hostId = targetUserId;
         emitLobbyState(io, lobbyId, lobby);
@@ -226,10 +240,9 @@ export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string
     });
 
     socket.on('lobby:claimHost', async () => {
-        const { lobbyId, userId } = socket.data || {};
-        if (!lobbyId || !userId) return;
-        const lobby = lobbies.get(lobbyId);
-        if (!lobby || !lobby.players.has(userId)) return;
+        const ctx = getLobby(socket, lobbies);
+        if (!ctx || !ctx.lobby.players.has(ctx.userId)) return;
+        const { lobbyId, userId, lobby } = ctx;
         const frontendUrl = process.env.FRONTEND_URL;
         const secret = process.env.INTERNAL_API_KEY;
         if (!frontendUrl || !secret) return;
@@ -247,10 +260,9 @@ export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string
     // ── Game options ──────────────────────────────────────────────────────────
 
     socket.on('lobby:setGameType', ({ gameType }) => {
-        const { lobbyId, userId } = socket.data || {};
-        if (!lobbyId || !userId) return;
-        const lobby = lobbies.get(lobbyId);
-        if (!lobby || lobby.hostId !== userId) return;
+        const ctx = getHostLobby(socket, lobbies);
+        if (!ctx) return;
+        const { lobbyId, lobby } = ctx;
         if (!VALID_GAME_TYPES.includes(gameType)) return;
         lobby.gameType = gameType;
         lobby.bots = 0;
@@ -264,10 +276,9 @@ export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string
     });
 
     socket.on('lobby:addBot', () => {
-        const { lobbyId, userId } = socket.data || {};
-        if (!lobbyId || !userId) return;
-        const lobby = lobbies.get(lobbyId);
-        if (!lobby || lobby.hostId !== userId) return;
+        const ctx = getHostLobby(socket, lobbies);
+        if (!ctx) return;
+        const { lobbyId, lobby } = ctx;
         if (!BOT_SUPPORTED_GAMES.has(lobby.gameType)) return;
         lobby.botSlots ||= [];
         if (lobby.players.size + lobby.botSlots.length >= (lobby.maxPlayers ?? 2)) return;
@@ -280,10 +291,9 @@ export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string
     });
 
     socket.on('lobby:removeBot', () => {
-        const { lobbyId, userId } = socket.data || {};
-        if (!lobbyId || !userId) return;
-        const lobby = lobbies.get(lobbyId);
-        if (!lobby || lobby.hostId !== userId) return;
+        const ctx = getHostLobby(socket, lobbies);
+        if (!ctx) return;
+        const { lobbyId, lobby } = ctx;
         lobby.botSlots ||= [];
         if (lobby.botSlots.length === 0) return;
         const removed = lobby.botSlots.pop();
@@ -295,116 +305,99 @@ export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string
     });
 
     socket.on('lobby:setQuiz', ({ quizId }) => {
-        const { lobbyId, userId } = socket.data || {};
-        if (!lobbyId || !userId) return;
-        const lobby = lobbies.get(lobbyId);
-        if (!lobby || lobby.hostId !== userId) return;
-        lobby.quizId = quizId ?? null;
-        emitLobbyState(io, lobbyId, lobby);
+        const ctx = getHostLobby(socket, lobbies);
+        if (!ctx) return;
+        ctx.lobby.quizId = quizId ?? null;
+        emitLobbyState(io, ctx.lobbyId, ctx.lobby);
     });
 
     socket.on('lobby:setQuizOptions', ({ timeMode, timePerQuestion }) => {
-        const { lobbyId, userId } = socket.data || {};
-        if (!lobbyId || !userId) return;
-        const lobby = lobbies.get(lobbyId);
-        if (!lobby || lobby.hostId !== userId) return;
+        const ctx = getHostLobby(socket, lobbies);
+        if (!ctx) return;
+        const { lobbyId, lobby } = ctx;
         if (timeMode !== undefined) {
             const normalized = timeMode === 'quiz:per_question' ? 'per_question' : timeMode;
             if (['per_question', 'total', 'none'].includes(normalized)) lobby.timeMode = normalized;
         }
-        if (timePerQuestion !== undefined) {
-            const t = Number(timePerQuestion);
-            if (Number.isFinite(t) && t >= 5 && t <= 3600) lobby.timePerQuestion = t;
-        }
+        const t = numOpt(timePerQuestion, 5, 3600);
+        if (t !== undefined) lobby.timePerQuestion = t;
         emitLobbyState(io, lobbyId, lobby);
     });
 
     socket.on('lobby:setUnoOptions', ({ stackable, jumpIn, teamMode, teamWinMode }) => {
-        const { lobbyId, userId } = socket.data || {};
-        if (!lobbyId || !userId) return;
-        const lobby = lobbies.get(lobbyId);
-        if (!lobby || lobby.hostId !== userId) return;
+        const ctx = getHostLobby(socket, lobbies);
+        if (!ctx) return;
+        const { lobbyId, lobby } = ctx;
         lobby.unoOptions ||= { stackable: false, jumpIn: false, teamMode: 'none', teamWinMode: 'one' };
         if (typeof stackable === 'boolean') lobby.unoOptions.stackable = stackable;
         if (typeof jumpIn === 'boolean') lobby.unoOptions.jumpIn = jumpIn;
-        if (teamMode === 'none' || teamMode === '2v2') {
-            lobby.unoOptions.teamMode = teamMode;
-            lobby.teams = teamMode === '2v2' ? new Map() : null;
-        }
         if (teamWinMode === 'one' || teamWinMode === 'both') lobby.unoOptions.teamWinMode = teamWinMode;
+        applyTeamMode(lobby, 'unoOptions', teamMode);
         emitLobbyState(io, lobbyId, lobby);
     });
 
     socket.on('lobby:setTabooOptions', ({ turnDuration, totalRounds, trapWordCount, maxAttempts, trapDuration }) => {
-        const { lobbyId, userId } = socket.data || {};
-        if (!lobbyId || !userId) return;
-        const lobby = lobbies.get(lobbyId);
-        if (!lobby || lobby.hostId !== userId) return;
+        const ctx = getHostLobby(socket, lobbies);
+        if (!ctx) return;
+        const { lobbyId, lobby } = ctx;
         lobby.tabooOptions ||= { turnDuration: 120, totalRounds: 3, trapWordCount: 5, maxAttempts: 10, trapDuration: 90 };
-        const td = Number(turnDuration); if (Number.isFinite(td) && td >= 15 && td <= 300) lobby.tabooOptions.turnDuration = td;
-        const tr = Number(totalRounds);  if (Number.isFinite(tr) && tr >= 1  && tr <= 10)  lobby.tabooOptions.totalRounds  = tr;
-        const tw = Number(trapWordCount); if (Number.isFinite(tw) && tw >= 1 && tw <= 10) lobby.tabooOptions.trapWordCount  = tw;
-        const ma = Number(maxAttempts);  if (Number.isFinite(ma) && ma >= 1  && ma <= 30)  lobby.tabooOptions.maxAttempts   = ma;
-        const tp = Number(trapDuration); if (Number.isFinite(tp) && tp >= 15 && tp <= 300) lobby.tabooOptions.trapDuration  = tp;
+        const td = numOpt(turnDuration,  15, 300); if (td !== undefined) lobby.tabooOptions.turnDuration  = td;
+        const tr = numOpt(totalRounds,    1,  10); if (tr !== undefined) lobby.tabooOptions.totalRounds   = tr;
+        const tw = numOpt(trapWordCount,  1,  10); if (tw !== undefined) lobby.tabooOptions.trapWordCount  = tw;
+        const ma = numOpt(maxAttempts,    1,  30); if (ma !== undefined) lobby.tabooOptions.maxAttempts   = ma;
+        const tp = numOpt(trapDuration,  15, 300); if (tp !== undefined) lobby.tabooOptions.trapDuration  = tp;
         emitLobbyState(io, lobbyId, lobby);
     });
 
     socket.on('lobby:setSkyjowOptions', ({ eliminateRows }) => {
-        const { lobbyId, userId } = socket.data || {};
-        if (!lobbyId || !userId) return;
-        const lobby = lobbies.get(lobbyId);
-        if (!lobby || lobby.hostId !== userId) return;
+        const ctx = getHostLobby(socket, lobbies);
+        if (!ctx) return;
+        const { lobbyId, lobby } = ctx;
         lobby.skyjowOptions ||= { eliminateRows: false };
         if (typeof eliminateRows === 'boolean') lobby.skyjowOptions.eliminateRows = eliminateRows;
         emitLobbyState(io, lobbyId, lobby);
     });
 
     socket.on('lobby:setBattleshipOptions', ({ gridSize, turnTime }) => {
-        const { lobbyId, userId } = socket.data || {};
-        if (!lobbyId || !userId) return;
-        const lobby = lobbies.get(lobbyId);
-        if (!lobby || lobby.hostId !== userId) return;
+        const ctx = getHostLobby(socket, lobbies);
+        if (!ctx) return;
+        const { lobbyId, lobby } = ctx;
         lobby.battleshipOptions ||= { gridSize: 10, ships: [5, 4, 3, 3, 2] };
-        const g = Number(gridSize); if (Number.isFinite(g) && g >= 8 && g <= 15) lobby.battleshipOptions.gridSize = g;
-        const t = Number(turnTime); if (Number.isFinite(t) && t >= 10 && t <= 120) lobby.battleshipOptions.turnTime = t;
+        const g = numOpt(gridSize,  8, 15); if (g !== undefined) lobby.battleshipOptions.gridSize  = g;
+        const t = numOpt(turnTime, 10, 120); if (t !== undefined) lobby.battleshipOptions.turnTime = t;
         emitLobbyState(io, lobbyId, lobby);
     });
 
     socket.on('lobby:setLudoOptions', ({ pawnExit, bonusOn6, winMode, teamMode }) => {
-        const { lobbyId, userId } = socket.data || {};
-        if (!lobbyId || !userId) return;
-        const lobby = lobbies.get(lobbyId);
-        if (!lobby || lobby.hostId !== userId) return;
+        const ctx = getHostLobby(socket, lobbies);
+        if (!ctx) return;
+        const { lobbyId, lobby } = ctx;
         lobby.ludoOptions ||= { pawnExit: '6', bonusOn6: 'unlimited', winMode: 'first_done', teamMode: 'none' };
         if (pawnExit === '6' || pawnExit === '6_or_1' || pawnExit === 'any') lobby.ludoOptions.pawnExit = pawnExit;
         if (bonusOn6 === 'unlimited' || bonusOn6 === 'triple_lose' || bonusOn6 === 'none') lobby.ludoOptions.bonusOn6 = bonusOn6;
         if (winMode === 'first_done' || winMode === 'full_ranking') lobby.ludoOptions.winMode = winMode;
-        if (teamMode === 'none' || teamMode === '2v2') {
-            lobby.ludoOptions.teamMode = teamMode;
-            lobby.teams = teamMode === '2v2' ? new Map() : null;
-            if (lobby.gameType === 'ludo') lobby.maxPlayers = 4;
-        }
+        applyTeamMode(lobby, 'ludoOptions', teamMode);
+        lobby.maxPlayers = 4; // ludo is always capped at 4
         emitLobbyState(io, lobbyId, lobby);
     });
 
     socket.on('lobby:setImpostorOptions', ({ rounds, timePerRound, misterWhite }) => {
-        const { lobbyId, userId } = socket.data || {};
-        if (!lobbyId || !userId) return;
-        const lobby = lobbies.get(lobbyId);
-        if (!lobby || lobby.hostId !== userId) return;
+        const ctx = getHostLobby(socket, lobbies);
+        if (!ctx) return;
+        const { lobbyId, lobby } = ctx;
         lobby.impostorOptions ||= { rounds: 1, timePerRound: 60, misterWhite: false };
-        const r = Number(rounds);      if (Number.isFinite(r) && r >= 1  && r <= 5)   lobby.impostorOptions.rounds      = r;
-        const t = Number(timePerRound); if (Number.isFinite(t) && t >= 30 && t <= 120) lobby.impostorOptions.timePerRound = t;
+        const r = numOpt(rounds,      1,   5); if (r !== undefined) lobby.impostorOptions.rounds      = r;
+        const t = numOpt(timePerRound, 30, 120); if (t !== undefined) lobby.impostorOptions.timePerRound = t;
         if (typeof misterWhite === 'boolean') lobby.impostorOptions.misterWhite = misterWhite;
         emitLobbyState(io, lobbyId, lobby);
     });
 
     socket.on('lobby:setTeam', ({ team }) => {
-        const { lobbyId, userId } = socket.data || {};
-        if (!lobbyId || !userId) return;
-        const lobby = lobbies.get(lobbyId);
+        const ctx = getLobby(socket, lobbies);
+        if (!ctx) return;
+        const { lobbyId, userId, lobby } = ctx;
         const teamNum = Number(team);
-        if (!lobby || (teamNum !== 0 && teamNum !== 1)) return;
+        if (teamNum !== 0 && teamNum !== 1) return;
         if (!lobby.teams) lobby.teams = new Map();
         if (lobby.teams.get(userId) === teamNum) lobby.teams.delete(userId);
         else lobby.teams.set(userId, teamNum);
@@ -413,10 +406,9 @@ export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string
     });
 
     socket.on('lobby:shuffleTeams', () => {
-        const { lobbyId, userId } = socket.data || {};
-        if (!lobbyId || !userId) return;
-        const lobby = lobbies.get(lobbyId);
-        if (!lobby || lobby.hostId !== userId) return;
+        const ctx = getHostLobby(socket, lobbies);
+        if (!ctx) return;
+        const { lobbyId, lobby } = ctx;
         const humanIds = Array.from(lobby.players.keys());
         const botIds = (lobby.botSlots ?? []).map((b: { userId: string }) => b.userId);
         const ids = [...humanIds, ...botIds].sort(() => Math.random() - 0.5);
@@ -447,13 +439,11 @@ export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string
 
         const doWake = async () => {
             io.to(`lobby:${lobbyId}`).emit('lobby:server_warming', { estimatedSeconds: 60 });
-            // Fire-and-forget: wake the Render service (one HTTP request is enough to trigger cold start)
             const gsUrl = GAME_SERVER_URLS[gameType];
             if (gsUrl) fetch(`${gsUrl}/health`, { signal: AbortSignal.timeout(5_000) }).catch(() => {});
             await ensureConnected(gameType);
         };
 
-        // Step 1: wait for game server to connect (it self-connects when it starts up)
         if (!gameServerConnections.has(gameType)) {
             try {
                 await doWake();
@@ -474,8 +464,6 @@ export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string
             io.to(`lobby:${lobbyId}`).emit('game:start', fullPayload);
         };
 
-        // Step 2: send configure; if ack doesn't arrive in 8s, game server may have
-        // disconnected just after connecting — wait for it to reconnect and retry
         let done = false;
         const ackTimer = setTimeout(async () => {
             if (done) return;
@@ -508,30 +496,14 @@ export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string
     // ── Lobby list ────────────────────────────────────────────────────────────
 
     socket.on('get:lobbies', () => {
-        const lobbyList = Array.from(lobbies.entries())
-            .filter(([, lobby]) => lobby.isPublic !== false)
-            .map(([id, lobby]) => ({
-                id,
-                title:          lobby.title ?? `Lobby de ${Array.from<any>(lobby.players.values())[0]?.username ?? '?'}`,
-                description:    lobby.description ?? '',
-                gameType:       lobby.gameType ?? 'quiz',
-                maxPlayers:     lobby.maxPlayers ?? 8,
-                currentPlayers: lobby.players.size + (lobby.bots ?? 0),
-                status:         lobby.status === 'WAITING' ? 'waiting' : 'in-progress',
-                host:           Array.from<any>(lobby.players.values()).find((p: any) => p.userId === lobby.hostId)?.username ?? '?',
-                playerNames:    [
-                    ...Array.from<any>(lobby.players.values()).map((p: any) => p.username),
-                    ...(lobby.botSlots ?? []).map((b: any) => b.username),
-                ],
-            }));
-        socket.emit('lobbies', lobbyList);
+        socket.emit('lobbies', buildLobbyList(lobbies));
     });
 
     // ── Disconnect ────────────────────────────────────────────────────────────
 
     socket.on('disconnect', () => {
-        const { lobbyId, userId } = socket.data || {};
-        if (!lobbyId || !userId) return;
-        removePlayerAndMaybeTransferHost(io, lobbies, lobbyId, userId);
+        const ctx = getLobby(socket, lobbies);
+        if (!ctx) return;
+        removePlayerAndMaybeTransferHost(io, lobbies, ctx.lobbyId, ctx.userId);
     });
 }

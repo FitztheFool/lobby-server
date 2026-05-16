@@ -49,8 +49,8 @@ export function emitLobbyState(io: Server, lobbyId: string, lobby: any): void {
     });
 }
 
-export function broadcastLobbies(io: Server, lobbies: Map<string, any>): void {
-    const lobbyList = Array.from(lobbies.entries())
+export function buildLobbyList(lobbies: Map<string, any>): any[] {
+    return Array.from(lobbies.entries())
         .filter(([, lobby]) => lobby.isPublic !== false)
         .map(([id, lobby]) => ({
             id,
@@ -66,7 +66,10 @@ export function broadcastLobbies(io: Server, lobbies: Map<string, any>): void {
                 ...(lobby.botSlots ?? []).map((b: any) => b.username),
             ],
         }));
-    io.emit('lobbies', lobbyList);
+}
+
+export function broadcastLobbies(io: Server, lobbies: Map<string, any>): void {
+    io.emit('lobbies', buildLobbyList(lobbies));
 }
 
 export function removePlayerAndMaybeTransferHost(
