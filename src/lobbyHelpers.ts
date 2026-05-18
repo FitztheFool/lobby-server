@@ -39,6 +39,7 @@ export function emitLobbyState(io: Server, lobbyId: string, lobby: any): void {
         skyjowOptions:   lobby.skyjowOptions ?? { eliminateRows: false },
         impostorOptions: lobby.impostorOptions ?? { rounds: 1 },
         ludoOptions:     lobby.ludoOptions ?? { pawnExit: '6', bonusOn6: 'unlimited', winMode: 'first_done', teamMode: 'none' },
+        perudoOptions:   lobby.perudoOptions ?? { initialDice: 5 },
         title:           lobby.title ?? null,
         description:     lobby.description ?? null,
         maxPlayers:      lobby.maxPlayers ?? 8,

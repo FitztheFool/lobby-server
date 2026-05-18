@@ -4,12 +4,12 @@ import { Server, Socket } from 'socket.io';
 import { gameServerConnections, ensureConnected, preWarm, sendConfigure, GAME_SERVER_URLS } from './gameServers';
 import { emitLobbyState, broadcastLobbies, buildLobbyList, removePlayerAndMaybeTransferHost, autoFillBotTeams } from './lobbyHelpers';
 
-const BOT_SUPPORTED_GAMES = new Set(['puissance4', 'yahtzee', 'diamant', 'battleship', 'uno', 'skyjow', 'ludo']);
+const BOT_SUPPORTED_GAMES = new Set(['puissance4', 'yahtzee', 'diamant', 'battleship', 'uno', 'skyjow', 'ludo', 'perudo']);
 
-const VALID_GAME_TYPES = ['quiz', 'uno', 'taboo', 'skyjow', 'yahtzee', 'puissance4', 'just_one', 'battleship', 'diamant', 'impostor', 'ludo'];
+const VALID_GAME_TYPES = ['quiz', 'uno', 'taboo', 'skyjow', 'yahtzee', 'puissance4', 'just_one', 'battleship', 'diamant', 'impostor', 'ludo', 'perudo'];
 
 const DEFAULT_MAX_PLAYERS: Record<string, number> = {
-    quiz: 30, puissance4: 2, battleship: 2, diamant: 8, impostor: 8, just_one: 7, ludo: 4,
+    quiz: 30, puissance4: 2, battleship: 2, diamant: 8, impostor: 8, just_one: 7, ludo: 4, perudo: 6,
 };
 
 function canStart(lobby: any): boolean {
@@ -24,6 +24,7 @@ function canStart(lobby: any): boolean {
     if (g === 'diamant' && (lobby.players.size < 1 || total < 2 || total > 8)) return false;
     if (g === 'impostor' && lobby.players.size < 4) return false;
     if (g === 'ludo' && (lobby.players.size < 1 || total < 2 || total > 4)) return false;
+    if (g === 'perudo' && (lobby.players.size < 1 || total < 2 || total > 6)) return false;
     if (g === 'taboo') {
         if (!lobby.teams || lobby.teams.size < 4) return false;
         const t0 = Array.from<number>(lobby.teams.values()).filter(t => t === 0).length;
@@ -118,6 +119,7 @@ export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string
                 diamantOptions:  { roundCount: 5 },
                 impostorOptions: { rounds: 1, timePerRound: 60 },
                 ludoOptions: { pawnExit: '6', bonusOn6: 'unlimited', winMode: 'first_done', teamMode: 'none' },
+                perudoOptions: { initialDice: 5 },
                 orators: { '0': null, '1': null },
             };
         }
@@ -143,6 +145,7 @@ export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string
         lobby.battleshipOptions ||= { gridSize: 10, ships: [5, 4, 3, 3, 2] };
         lobby.impostorOptions   ||= { rounds: 1, timePerRound: 60 };
         lobby.ludoOptions       ||= { pawnExit: '6', bonusOn6: 'unlimited', winMode: 'first_done', teamMode: 'none' };
+        lobby.perudoOptions     ||= { initialDice: 5 };
 
         lobbies.set(lobbyId, lobby);
         emitLobbyState(io, lobbyId, lobby);
@@ -378,6 +381,16 @@ export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string
         if (winMode === 'first_done' || winMode === 'full_ranking') lobby.ludoOptions.winMode = winMode;
         applyTeamMode(lobby, 'ludoOptions', teamMode);
         lobby.maxPlayers = 4; // ludo is always capped at 4
+        emitLobbyState(io, lobbyId, lobby);
+    });
+
+    socket.on('lobby:setPerudoOptions', ({ initialDice }) => {
+        const ctx = getHostLobby(socket, lobbies);
+        if (!ctx) return;
+        const { lobbyId, lobby } = ctx;
+        lobby.perudoOptions ||= { initialDice: 5 };
+        const d = numOpt(initialDice, 3, 6);
+        if (d !== undefined) lobby.perudoOptions.initialDice = d;
         emitLobbyState(io, lobbyId, lobby);
     });
 

@@ -18,6 +18,7 @@ export const GAME_SERVER_URLS: Record<string, string> = {
     diamant:    process.env.DIAMANT_SERVER_URL    ?? 'http://localhost:10009',
     impostor:   process.env.IMPOSTOR_SERVER_URL   ?? 'http://localhost:10010',
     ludo:       process.env.LUDO_SERVER_URL       ?? 'http://localhost:10011',
+    perudo:     process.env.PERUDO_SERVER_URL     ?? 'http://localhost:10012',
 };
 
 // ── Inbound game server connections ───────────────────────────────────────────
@@ -153,6 +154,16 @@ export function sendConfigure(gameType: string, lobbyId: string, lobby: any, onA
                 players: [...humanPlayers, ...botPlayers],
                 options: lobby.ludoOptions ?? { pawnExit: '6', bonusOn6: 'unlimited', winMode: 'first_done', teamMode: 'none' },
                 teams: lobby.teams ? Object.fromEntries(lobby.teams) : null,
+            }, onAck);
+            break;
+        }
+        case 'perudo': {
+            const humanPlayers = Array.from<any>(lobby.players.values());
+            const botPlayers = (lobby.botSlots ?? []) as Array<{ userId: string; username: string }>;
+            sock.emit('perudo:configure', {
+                lobbyId,
+                players: [...humanPlayers, ...botPlayers],
+                options: lobby.perudoOptions ?? { initialDice: 5 },
             }, onAck);
             break;
         }
