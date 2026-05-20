@@ -94,56 +94,57 @@ export function preWarm(gameType: string): void {
 
 // ── Configure senders ─────────────────────────────────────────────────────────
 
-export function sendConfigure(gameType: string, lobbyId: string, lobby: any, onAck?: () => void): void {
+export function sendConfigure(gameType: string, lobbyId: string, lobby: any, onAck?: () => void, opts?: { fresh?: boolean }): void {
     const sock = gameServerConnections.get(gameType);
     if (!sock) { console.log(`[CONF] ${gameType}: no connected game server`); return; }
+    const fresh = !!opts?.fresh;
 
     switch (gameType) {
         case 'uno': {
             const opts = lobby.unoOptions ?? { stackable: false, jumpIn: false, teamMode: 'none', teamWinMode: 'one' };
             const bots = (lobby.botSlots ?? []) as Array<{ userId: string; username: string }>;
-            sock.emit('uno:configure', { lobbyId, options: opts, expectedCount: lobby.players.size, preAssignedTeams: lobby.teams ? Object.fromEntries(lobby.teams) : null, botCount: bots.length, bots }, onAck);
+            sock.emit('uno:configure', { lobbyId, options: opts, expectedCount: lobby.players.size, preAssignedTeams: lobby.teams ? Object.fromEntries(lobby.teams) : null, botCount: bots.length, bots, fresh }, onAck);
             break;
         }
         case 'taboo': {
             const opts = lobby.tabooOptions ?? { turnDuration: 120, totalRounds: 3, trapWordCount: 5, maxAttempts: 10, trapDuration: 90 };
-            sock.emit('taboo:configure', { lobbyId, options: opts, teams: lobby.teams ? Object.fromEntries(lobby.teams) : null, orators: lobby.orators ?? { '0': null, '1': null }, hostId: lobby.hostId }, onAck);
+            sock.emit('taboo:configure', { lobbyId, options: opts, teams: lobby.teams ? Object.fromEntries(lobby.teams) : null, orators: lobby.orators ?? { '0': null, '1': null }, hostId: lobby.hostId, fresh }, onAck);
             break;
         }
         case 'skyjow': {
             const humanPlayers = Array.from<any>(lobby.players.values());
             const botPlayers = (lobby.botSlots ?? []) as Array<{ userId: string; username: string }>;
-            sock.emit('skyjow:configure', { lobbyId, players: [...humanPlayers, ...botPlayers], options: lobby.skyjowOptions ?? { eliminateRows: false } }, onAck);
+            sock.emit('skyjow:configure', { lobbyId, players: [...humanPlayers, ...botPlayers], options: lobby.skyjowOptions ?? { eliminateRows: false }, fresh }, onAck);
             break;
         }
         case 'yahtzee': {
             const humanPlayers = Array.from<any>(lobby.players.values());
             const botPlayers = (lobby.botSlots ?? []) as Array<{ userId: string; username: string }>;
-            sock.emit('yahtzee:configure', { lobbyId, players: [...humanPlayers, ...botPlayers] }, onAck);
+            sock.emit('yahtzee:configure', { lobbyId, players: [...humanPlayers, ...botPlayers], fresh }, onAck);
             break;
         }
         case 'puissance4': {
             const botName = (lobby.bots ?? 0) > 0 ? '🤖 Bot 1' : undefined;
-            sock.emit('p4:configure', { lobbyId, botName }, onAck);
+            sock.emit('p4:configure', { lobbyId, botName, fresh }, onAck);
             break;
         }
         case 'just_one': {
-            sock.emit('just_one:configure', { lobbyId, players: Array.from<any>(lobby.players.values()) }, onAck);
+            sock.emit('just_one:configure', { lobbyId, players: Array.from<any>(lobby.players.values()), fresh }, onAck);
             break;
         }
         case 'battleship': {
             const botName = (lobby.bots ?? 0) > 0 ? '🤖 Bot 1' : undefined;
-            sock.emit('battleship:configure', { lobbyId, options: lobby.battleshipOptions ?? {}, botName }, onAck);
+            sock.emit('battleship:configure', { lobbyId, options: lobby.battleshipOptions ?? {}, botName, fresh }, onAck);
             break;
         }
         case 'diamant': {
             const humanPlayers = Array.from(lobby.players.values());
             const botPlayers = (lobby.botSlots ?? []) as Array<{ userId: string; username: string }>;
-            sock.emit('diamant:configure', { lobbyId, players: [...humanPlayers, ...botPlayers], options: lobby.diamantOptions ?? { roundCount: 5 } }, onAck);
+            sock.emit('diamant:configure', { lobbyId, players: [...humanPlayers, ...botPlayers], options: lobby.diamantOptions ?? { roundCount: 5 }, fresh }, onAck);
             break;
         }
         case 'impostor': {
-            sock.emit('impostor:configure', { lobbyId, players: Array.from<any>(lobby.players.values()), expectedCount: lobby.players.size, options: lobby.impostorOptions ?? { rounds: 1 } }, onAck);
+            sock.emit('impostor:configure', { lobbyId, players: Array.from<any>(lobby.players.values()), expectedCount: lobby.players.size, options: lobby.impostorOptions ?? { rounds: 1 }, fresh }, onAck);
             break;
         }
         case 'ludo': {
@@ -154,6 +155,7 @@ export function sendConfigure(gameType: string, lobbyId: string, lobby: any, onA
                 players: [...humanPlayers, ...botPlayers],
                 options: lobby.ludoOptions ?? { pawnExit: '6', bonusOn6: 'unlimited', winMode: 'first_done', teamMode: 'none' },
                 teams: lobby.teams ? Object.fromEntries(lobby.teams) : null,
+                fresh,
             }, onAck);
             break;
         }
@@ -164,11 +166,12 @@ export function sendConfigure(gameType: string, lobbyId: string, lobby: any, onA
                 lobbyId,
                 players: [...humanPlayers, ...botPlayers],
                 options: lobby.perudoOptions ?? { initialDice: 5 },
+                fresh,
             }, onAck);
             break;
         }
         default: { // quiz
-            sock.emit('quiz:configure', { lobbyId, quizId: lobby.quizId, players: Array.from<any>(lobby.players.values()), expectedCount: lobby.players.size, timeMode: lobby.timeMode, timePerQuestion: lobby.timePerQuestion }, onAck);
+            sock.emit('quiz:configure', { lobbyId, quizId: lobby.quizId, players: Array.from<any>(lobby.players.values()), expectedCount: lobby.players.size, timeMode: lobby.timeMode, timePerQuestion: lobby.timePerQuestion, fresh }, onAck);
             break;
         }
     }

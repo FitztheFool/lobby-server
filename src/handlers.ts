@@ -494,7 +494,7 @@ export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string
             sendConfigure(gameType, lobbyId, lobby, () => {
                 if (gameType === 'quiz') startGame({ gameType: 'quiz', quizId: lobby.quizId });
                 else startGame({ gameType, lobbyId });
-            });
+            }, { fresh: true });
         }, 8_000);
 
         sendConfigure(gameType, lobbyId, lobby, () => {
@@ -503,7 +503,7 @@ export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string
             clearTimeout(ackTimer);
             if (gameType === 'quiz') startGame({ gameType: 'quiz', quizId: lobby.quizId });
             else startGame({ gameType, lobbyId });
-        });
+        }, { fresh: true });
     });
 
     // ── Lobby list ────────────────────────────────────────────────────────────
