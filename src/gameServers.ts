@@ -19,6 +19,7 @@ export const GAME_SERVER_URLS: Record<string, string> = {
     impostor:   process.env.IMPOSTOR_SERVER_URL   ?? 'http://localhost:10010',
     ludo:       process.env.LUDO_SERVER_URL       ?? 'http://localhost:10011',
     perudo:     process.env.PERUDO_SERVER_URL     ?? 'http://localhost:10012',
+    cant_stop:  process.env.CANT_STOP_SERVER_URL  ?? 'http://localhost:10013',
 };
 
 // ── Inbound game server connections ───────────────────────────────────────────
@@ -166,6 +167,17 @@ export function sendConfigure(gameType: string, lobbyId: string, lobby: any, onA
                 lobbyId,
                 players: [...humanPlayers, ...botPlayers],
                 options: lobby.perudoOptions ?? { initialDice: 5 },
+                fresh,
+            }, onAck);
+            break;
+        }
+        case 'cant_stop': {
+            const humanPlayers = Array.from<any>(lobby.players.values());
+            const botPlayers = (lobby.botSlots ?? []) as Array<{ userId: string; username: string }>;
+            sock.emit('cant_stop:configure', {
+                lobbyId,
+                players: [...humanPlayers, ...botPlayers],
+                options: lobby.cantStopOptions ?? { columnsToWin: 3 },
                 fresh,
             }, onAck);
             break;
