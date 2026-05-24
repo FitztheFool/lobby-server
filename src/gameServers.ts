@@ -183,7 +183,7 @@ export function sendConfigure(gameType: string, lobbyId: string, lobby: any, onA
             break;
         }
         default: { // quiz
-            sock.emit('quiz:configure', { lobbyId, quizId: lobby.quizId, players: Array.from<any>(lobby.players.values()), expectedCount: lobby.players.size, timeMode: lobby.timeMode, timePerQuestion: lobby.timePerQuestion, fresh }, onAck);
+            sock.emit('quiz:configure', { lobbyId, quizId: lobby.quizId, hostId: lobby.hostId, players: Array.from<any>(lobby.players.values()), expectedCount: lobby.players.size, timeMode: lobby.timeMode, timePerQuestion: lobby.timePerQuestion, fresh }, onAck);
             break;
         }
     }
