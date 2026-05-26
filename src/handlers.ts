@@ -4,12 +4,12 @@ import { Server, Socket } from 'socket.io';
 import { gameServerConnections, ensureConnected, preWarm, sendConfigure, GAME_SERVER_URLS } from './gameServers';
 import { emitLobbyState, broadcastLobbies, buildLobbyList, removePlayerAndMaybeTransferHost, autoFillBotTeams } from './lobbyHelpers';
 
-const BOT_SUPPORTED_GAMES = new Set(['puissance4', 'yahtzee', 'diamant', 'battleship', 'uno', 'skyjow', 'ludo', 'perudo', 'cant_stop']);
+const BOT_SUPPORTED_GAMES = new Set(['puissance4', 'yahtzee', 'diamant', 'battleship', 'uno', 'skyjow', 'ludo', 'perudo', 'cant_stop', 'mille_bornes']);
 
-const VALID_GAME_TYPES = ['quiz', 'uno', 'taboo', 'skyjow', 'yahtzee', 'puissance4', 'just_one', 'battleship', 'diamant', 'impostor', 'ludo', 'perudo', 'cant_stop'];
+const VALID_GAME_TYPES = ['quiz', 'uno', 'taboo', 'skyjow', 'yahtzee', 'puissance4', 'just_one', 'battleship', 'diamant', 'impostor', 'ludo', 'perudo', 'cant_stop', 'mille_bornes'];
 
 const DEFAULT_MAX_PLAYERS: Record<string, number> = {
-    quiz: 30, puissance4: 2, battleship: 2, diamant: 8, impostor: 8, just_one: 7, ludo: 4, perudo: 6, cant_stop: 4,
+    quiz: 30, puissance4: 2, battleship: 2, diamant: 8, impostor: 8, just_one: 7, ludo: 4, perudo: 6, cant_stop: 4, mille_bornes: 4,
 };
 
 function canStart(lobby: any): boolean {
@@ -26,6 +26,7 @@ function canStart(lobby: any): boolean {
     if (g === 'ludo' && (lobby.players.size < 1 || total < 2 || total > 4)) return false;
     if (g === 'perudo' && (lobby.players.size < 1 || total < 2 || total > 6)) return false;
     if (g === 'cant_stop' && (lobby.players.size < 1 || total < 2 || total > 4)) return false;
+    if (g === 'mille_bornes' && (lobby.players.size < 1 || total < 2 || total > 4)) return false;
     if (g === 'taboo') {
         if (!lobby.teams || lobby.teams.size < 4) return false;
         const t0 = Array.from<number>(lobby.teams.values()).filter(t => t === 0).length;
@@ -40,6 +41,13 @@ function canStart(lobby: any): boolean {
         if (t0 !== 2 || t1 !== 2) return false;
     }
     if (g === 'ludo' && lobby.ludoOptions?.teamMode === '2v2') {
+        if (total !== 4) return false;
+        if (!lobby.teams || lobby.teams.size !== 4) return false;
+        const t0 = Array.from<number>(lobby.teams.values()).filter(t => t === 0).length;
+        const t1 = Array.from<number>(lobby.teams.values()).filter(t => t === 1).length;
+        if (t0 !== 2 || t1 !== 2) return false;
+    }
+    if (g === 'mille_bornes' && lobby.mbOptions?.teamMode === '2v2') {
         if (total !== 4) return false;
         if (!lobby.teams || lobby.teams.size !== 4) return false;
         const t0 = Array.from<number>(lobby.teams.values()).filter(t => t === 0).length;
@@ -122,6 +130,7 @@ export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string
                 ludoOptions: { pawnExit: '6', bonusOn6: 'unlimited', winMode: 'first_done', teamMode: 'none' },
                 perudoOptions: { initialDice: 5 },
                 cantStopOptions: { columnsToWin: 3 },
+                mbOptions: { target: 1000, teamMode: 'none', teamDistance: 'individual' },
                 orators: { '0': null, '1': null },
             };
         }
@@ -149,6 +158,7 @@ export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string
         lobby.ludoOptions       ||= { pawnExit: '6', bonusOn6: 'unlimited', winMode: 'first_done', teamMode: 'none' };
         lobby.perudoOptions     ||= { initialDice: 5 };
         lobby.cantStopOptions   ||= { columnsToWin: 3 };
+        lobby.mbOptions         ||= { target: 1000, teamMode: 'none', teamDistance: 'individual' };
 
         lobbies.set(lobbyId, lobby);
         emitLobbyState(io, lobbyId, lobby);
@@ -277,6 +287,7 @@ export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string
         lobby.maxPlayers = DEFAULT_MAX_PLAYERS[gameType] ?? 8;
         if (gameType === 'uno' && lobby.unoOptions?.teamMode === '2v2') lobby.maxPlayers = 4;
         if (gameType === 'ludo' && lobby.ludoOptions?.teamMode === '2v2') lobby.maxPlayers = 4;
+        if (gameType === 'mille_bornes' && lobby.mbOptions?.teamMode === '2v2') lobby.maxPlayers = 4;
         emitLobbyState(io, lobbyId, lobby);
         broadcastLobbies(io, lobbies);
     });
@@ -404,6 +415,20 @@ export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string
         lobby.cantStopOptions ||= { columnsToWin: 3 };
         const c = numOpt(columnsToWin, 2, 4);
         if (c !== undefined) lobby.cantStopOptions.columnsToWin = c;
+        emitLobbyState(io, lobbyId, lobby);
+    });
+
+    socket.on('lobby:setMilleBornesOptions', ({ target, teamMode, teamDistance }) => {
+        const ctx = getHostLobby(socket, lobbies);
+        if (!ctx) return;
+        const { lobbyId, lobby } = ctx;
+        lobby.mbOptions ||= { target: 1000, teamMode: 'none', teamDistance: 'individual' };
+        if (target === 700 || target === 1000) lobby.mbOptions.target = target;
+        if (teamDistance === 'individual' || teamDistance === 'shared') lobby.mbOptions.teamDistance = teamDistance;
+        if (teamMode === 'none' || teamMode === '2v2') {
+            applyTeamMode(lobby, 'mbOptions', teamMode);
+            lobby.maxPlayers = teamMode === '2v2' ? 4 : lobby.maxPlayers;
+        }
         emitLobbyState(io, lobbyId, lobby);
     });
 

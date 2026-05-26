@@ -20,6 +20,7 @@ export const GAME_SERVER_URLS: Record<string, string> = {
     ludo:       process.env.LUDO_SERVER_URL       ?? 'http://localhost:10011',
     perudo:     process.env.PERUDO_SERVER_URL     ?? 'http://localhost:10012',
     cant_stop:  process.env.CANT_STOP_SERVER_URL  ?? 'http://localhost:10013',
+    mille_bornes: process.env.MILLE_BORNES_SERVER_URL ?? 'http://localhost:10014',
 };
 
 // ── Inbound game server connections ───────────────────────────────────────────
@@ -178,6 +179,18 @@ export function sendConfigure(gameType: string, lobbyId: string, lobby: any, onA
                 lobbyId,
                 players: [...humanPlayers, ...botPlayers],
                 options: lobby.cantStopOptions ?? { columnsToWin: 3 },
+                fresh,
+            }, onAck);
+            break;
+        }
+        case 'mille_bornes': {
+            const humanPlayers = Array.from<any>(lobby.players.values());
+            const botPlayers = (lobby.botSlots ?? []) as Array<{ userId: string; username: string }>;
+            sock.emit('mille_bornes:configure', {
+                lobbyId,
+                players: [...humanPlayers, ...botPlayers],
+                options: lobby.mbOptions ?? { target: 1000, teamMode: 'none', teamDistance: 'individual' },
+                teams: lobby.teams ? Object.fromEntries(lobby.teams) : null,
                 fresh,
             }, onAck);
             break;
