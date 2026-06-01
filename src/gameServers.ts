@@ -21,6 +21,7 @@ export const GAME_SERVER_URLS: Record<string, string> = {
     perudo:     process.env.PERUDO_SERVER_URL     ?? 'http://localhost:10012',
     cant_stop:  process.env.CANT_STOP_SERVER_URL  ?? 'http://localhost:10013',
     mille_bornes: process.env.MILLE_BORNES_SERVER_URL ?? 'http://localhost:10014',
+    spyfall:    process.env.SPYFALL_SERVER_URL    ?? 'http://localhost:10015',
 };
 
 // ── Inbound game server connections ───────────────────────────────────────────
@@ -147,6 +148,10 @@ export function sendConfigure(gameType: string, lobbyId: string, lobby: any, onA
         }
         case 'impostor': {
             sock.emit('impostor:configure', { lobbyId, players: Array.from<any>(lobby.players.values()), expectedCount: lobby.players.size, options: lobby.impostorOptions ?? { rounds: 1 }, fresh }, onAck);
+            break;
+        }
+        case 'spyfall': {
+            sock.emit('spyfall:configure', { lobbyId, players: Array.from<any>(lobby.players.values()), expectedCount: lobby.players.size, options: lobby.spyfallOptions ?? { exchangesPerPlayer: 2, turnTime: 40 }, fresh }, onAck);
             break;
         }
         case 'ludo': {
