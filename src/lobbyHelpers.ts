@@ -38,7 +38,7 @@ export function emitLobbyState(io: Server, lobbyId: string, lobby: any): void {
         orators:         lobby.orators ?? { '0': null, '1': null },
         skyjowOptions:   lobby.skyjowOptions ?? { eliminateRows: false },
         impostorOptions: lobby.impostorOptions ?? { rounds: 1 },
-        spyfallOptions:  lobby.spyfallOptions ?? { exchangesPerPlayer: 2, turnTime: 40 },
+        spyfallOptions:  lobby.spyfallOptions ?? { exchangesPerPlayer: 2, turnTime: 60 },
         ludoOptions:     lobby.ludoOptions ?? { pawnExit: '6', bonusOn6: 'unlimited', winMode: 'first_done', teamMode: 'none' },
         perudoOptions:   lobby.perudoOptions ?? { initialDice: 5 },
         cantStopOptions: lobby.cantStopOptions ?? { columnsToWin: 3 },

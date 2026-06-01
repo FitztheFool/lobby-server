@@ -151,7 +151,7 @@ export function sendConfigure(gameType: string, lobbyId: string, lobby: any, onA
             break;
         }
         case 'spyfall': {
-            sock.emit('spyfall:configure', { lobbyId, players: Array.from<any>(lobby.players.values()), expectedCount: lobby.players.size, options: lobby.spyfallOptions ?? { exchangesPerPlayer: 2, turnTime: 40 }, fresh }, onAck);
+            sock.emit('spyfall:configure', { lobbyId, players: Array.from<any>(lobby.players.values()), expectedCount: lobby.players.size, options: lobby.spyfallOptions ?? { exchangesPerPlayer: 2, turnTime: 60 }, fresh }, onAck);
             break;
         }
         case 'ludo': {

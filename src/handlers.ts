@@ -128,7 +128,7 @@ export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string
                 battleshipOptions: { gridSize: 10, ships: [5, 4, 3, 3, 2] },
                 diamantOptions:  { roundCount: 5 },
                 impostorOptions: { rounds: 1, timePerRound: 60 },
-                spyfallOptions: { exchangesPerPlayer: 2, turnTime: 40 },
+                spyfallOptions: { exchangesPerPlayer: 2, turnTime: 60 },
                 ludoOptions: { pawnExit: '6', bonusOn6: 'unlimited', winMode: 'first_done', teamMode: 'none' },
                 perudoOptions: { initialDice: 5 },
                 cantStopOptions: { columnsToWin: 3 },
@@ -451,8 +451,8 @@ export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string
         if (!ctx) return;
         const { lobbyId, lobby } = ctx;
         lobby.spyfallOptions ||= { exchangesPerPlayer: 2, turnTime: 40 };
-        const e = numOpt(exchangesPerPlayer, 1,  3); if (e !== undefined) lobby.spyfallOptions.exchangesPerPlayer = e;
-        const t = numOpt(turnTime,          20, 90); if (t !== undefined) lobby.spyfallOptions.turnTime          = t;
+        const e = numOpt(exchangesPerPlayer, 1,   3); if (e !== undefined) lobby.spyfallOptions.exchangesPerPlayer = e;
+        const t = numOpt(turnTime,          30, 120); if (t !== undefined) lobby.spyfallOptions.turnTime          = t;
         emitLobbyState(io, lobbyId, lobby);
     });
 
