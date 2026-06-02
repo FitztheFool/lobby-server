@@ -1,5 +1,6 @@
 // lobby-server/src/index.ts
 import 'dotenv/config';
+import { timingSafeEqual } from 'crypto';
 import express from 'express';
 import cors from 'cors';
 import http from 'http';
@@ -10,6 +11,32 @@ import { registerHandlers } from './handlers';
 
 const app = express();
 app.get('/health', cors(), (_req, res) => res.status(200).send('ok'));
+
+// ── Internal push: let the Next app deliver realtime events to a user ───────────
+// Used by the DM API to push `dm:message` to a recipient's personal room.
+const INTERNAL_API_KEY = process.env.INTERNAL_API_KEY;
+const EMIT_EVENT_ALLOWLIST = new Set(['dm:message', 'dm:read', 'lobby:invited']);
+
+function authorizedInternal(authHeader: string): boolean {
+    if (!INTERNAL_API_KEY) return false;
+    const expected = `Bearer ${INTERNAL_API_KEY}`;
+    if (authHeader.length !== expected.length) return false;
+    return timingSafeEqual(Buffer.from(authHeader), Buffer.from(expected));
+}
+
+app.post('/internal/emit', express.json({ limit: '64kb' }), (req, res) => {
+    if (!authorizedInternal(req.headers.authorization ?? '')) {
+        res.status(401).json({ error: 'unauthorized' });
+        return;
+    }
+    const { room, event, payload } = req.body ?? {};
+    if (typeof room !== 'string' || !room.startsWith('user:') || !EMIT_EVENT_ALLOWLIST.has(event)) {
+        res.status(400).json({ error: 'bad_request' });
+        return;
+    }
+    io.to(room).emit(event, payload);
+    res.json({ ok: true });
+});
 
 // Proxy health check so the browser (not lobby-server) wakes the game server, avoiding IP-based rate limiting
 app.get('/warmup/:gameType', cors(), async (req, res) => {

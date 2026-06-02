@@ -89,7 +89,51 @@ function applyTeamMode(lobby: any, optionsKey: string, teamMode: unknown): void 
 
 // ── Register handlers ─────────────────────────────────────────────────────────
 
+// Per-user invite throttle: at most one invite to the same target every 5s.
+const lastInviteAt = new Map<string, number>();
+const INVITE_COOLDOWN_MS = 5_000;
+
+// Once a lobby's game starts, its pending invites are stale → ask the front
+// (which owns the DB) to delete them. Best-effort; invites also expire via TTL.
+async function purgeLobbyInvites(lobbyId: string): Promise<void> {
+    const frontendUrl = process.env.FRONTEND_URL;
+    const secret = process.env.INTERNAL_API_KEY;
+    if (!frontendUrl || !secret) return;
+    try {
+        await fetch(`${frontendUrl}/api/internal/lobby-invites?lobbyId=${encodeURIComponent(lobbyId)}`, {
+            method: 'DELETE',
+            headers: { Authorization: `Bearer ${secret}` },
+            signal: AbortSignal.timeout(3_000),
+        });
+    } catch {
+        /* best-effort */
+    }
+}
+
 export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string, any>): void {
+
+    // Stable personal room used to push invites / DMs to every tab of this user.
+    if (socket.data?.userId) socket.join(`user:${socket.data.userId}`);
+
+    // ── Lobby invites (any member) ──────────────────────────────────────────────
+    socket.on('lobby:invite', ({ toUserId }) => {
+        const ctx = getLobby(socket, lobbies);
+        if (!ctx) return; // not in a lobby
+        if (typeof toUserId !== 'string' || !toUserId || toUserId === ctx.userId) return;
+
+        const key = `${ctx.userId}:${toUserId}`;
+        const now = Date.now();
+        if (now - (lastInviteAt.get(key) ?? 0) < INVITE_COOLDOWN_MS) return;
+        lastInviteAt.set(key, now);
+
+        io.to(`user:${toUserId}`).emit('lobby:invited', {
+            lobbyId: ctx.lobbyId,
+            gameType: ctx.lobby.gameType ?? 'quiz',
+            fromUserId: ctx.userId,
+            fromUsername: socket.data.username,
+        });
+        socket.emit('lobby:inviteSent', { toUserId });
+    });
 
     socket.on('lobby:join', ({ lobbyId, title, description, maxPlayers, isPublic, gameType }) => {
         const { userId, username } = socket.data;
@@ -526,6 +570,7 @@ export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string
             const fullPayload = { ...payload, gameId };
             lobby.gameStartPayload = fullPayload;
             io.to(`lobby:${lobbyId}`).emit('game:start', fullPayload);
+            void purgeLobbyInvites(lobbyId);
         };
 
         let done = false;
