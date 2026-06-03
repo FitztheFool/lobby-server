@@ -2,7 +2,7 @@
 import { randomUUID } from 'crypto';
 import { Server, Socket } from 'socket.io';
 import { gameServerConnections, ensureConnected, preWarm, sendConfigure, GAME_SERVER_URLS } from './gameServers';
-import { emitLobbyState, broadcastLobbies, buildLobbyList, removePlayerAndMaybeTransferHost, autoFillBotTeams } from './lobbyHelpers';
+import { emitLobbyState, broadcastLobbies, buildLobbyList, removePlayerAndMaybeTransferHost, autoFillBotTeams, purgeLobbyInvites } from './lobbyHelpers';
 
 const BOT_SUPPORTED_GAMES = new Set(['puissance4', 'yahtzee', 'diamant', 'battleship', 'uno', 'skyjow', 'ludo', 'perudo', 'cant_stop', 'mille_bornes']);
 
@@ -92,23 +92,6 @@ function applyTeamMode(lobby: any, optionsKey: string, teamMode: unknown): void 
 // Per-user invite throttle: at most one invite to the same target every 5s.
 const lastInviteAt = new Map<string, number>();
 const INVITE_COOLDOWN_MS = 5_000;
-
-// Once a lobby's game starts, its pending invites are stale → ask the front
-// (which owns the DB) to delete them. Best-effort; invites also expire via TTL.
-async function purgeLobbyInvites(lobbyId: string): Promise<void> {
-    const frontendUrl = process.env.FRONTEND_URL;
-    const secret = process.env.INTERNAL_API_KEY;
-    if (!frontendUrl || !secret) return;
-    try {
-        await fetch(`${frontendUrl}/api/internal/lobby-invites?lobbyId=${encodeURIComponent(lobbyId)}`, {
-            method: 'DELETE',
-            headers: { Authorization: `Bearer ${secret}` },
-            signal: AbortSignal.timeout(3_000),
-        });
-    } catch {
-        /* best-effort */
-    }
-}
 
 export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string, any>): void {
 
@@ -287,7 +270,7 @@ export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string
         lobby.players.delete(targetUserId);
         lobby.members?.delete(targetUserId);
         if (lobby.teams) lobby.teams.delete(targetUserId);
-        if (lobby.players.size === 0) { lobbies.delete(lobbyId); return; }
+        if (lobby.players.size === 0) { lobbies.delete(lobbyId); void purgeLobbyInvites(lobbyId); return; }
         emitLobbyState(io, lobbyId, lobby);
         broadcastLobbies(io, lobbies);
     });

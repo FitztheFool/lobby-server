@@ -1,6 +1,24 @@
 // lobby-server/src/lobbyHelpers.ts
 import { Server } from 'socket.io';
 
+// When a lobby ends (its game started, or it was destroyed) its pending invites
+// are stale → ask the front (which owns the DB) to delete them. Best-effort;
+// invites also expire via TTL on the front.
+export async function purgeLobbyInvites(lobbyId: string): Promise<void> {
+    const frontendUrl = process.env.FRONTEND_URL;
+    const secret = process.env.INTERNAL_API_KEY;
+    if (!frontendUrl || !secret) return;
+    try {
+        await fetch(`${frontendUrl}/api/internal/lobby-invites?lobbyId=${encodeURIComponent(lobbyId)}`, {
+            method: 'DELETE',
+            headers: { Authorization: `Bearer ${secret}` },
+            signal: AbortSignal.timeout(3_000),
+        });
+    } catch {
+        /* best-effort */
+    }
+}
+
 export function isTeamModeActive(lobby: any): boolean {
     return (lobby.gameType === 'uno' && lobby.unoOptions?.teamMode === '2v2')
         || (lobby.gameType === 'ludo' && lobby.ludoOptions?.teamMode === '2v2');
@@ -87,7 +105,7 @@ export function removePlayerAndMaybeTransferHost(
     if (lobby.resultViewers?.has(userId)) { lobby.resultViewers.delete(userId); return; }
     lobby.players.delete(userId);
     if (lobby.teams) lobby.teams.delete(userId);
-    if (lobby.players.size === 0) { lobbies.delete(lobbyId); broadcastLobbies(io, lobbies); return; }
+    if (lobby.players.size === 0) { lobbies.delete(lobbyId); void purgeLobbyInvites(lobbyId); broadcastLobbies(io, lobbies); return; }
     if (lobby.hostId === userId) lobby.hostId = (Array.from<any>(lobby.players.values())[0] as any).userId;
     autoFillBotTeams(lobby);
     emitLobbyState(io, lobbyId, lobby);
