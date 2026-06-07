@@ -73,12 +73,12 @@ io.on('connection', (socket) => {
         return;
     }
     // Regular client connection
-    console.log('nouvelle connexion lobby', socket.id);
+    console.log('[LOBBY] connexion', socket.id);
     registerHandlers(io, socket, lobbies);
 });
 
 const PORT = process.env.PORT || 10000;
-server.listen(PORT, () => console.log('[LOBBY] realtime listening on', PORT));
+server.listen(PORT, () => console.log('[LOBBY] listening on port', PORT));
 
 const shutdown = () => {
     io.close(() => {
