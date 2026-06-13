@@ -133,6 +133,11 @@ export function sendConfigure(gameType: string, lobbyId: string, lobby: any, onA
             sock.emit('p4:configure', { lobbyId, botName, fresh }, onAck);
             break;
         }
+        case 'abalone': {
+            const botName = (lobby.bots ?? 0) > 0 ? '🤖 Bot 1' : undefined;
+            sock.emit('abalone:configure', { lobbyId, botName, fresh }, onAck);
+            break;
+        }
         case 'just_one': {
             sock.emit('just_one:configure', { lobbyId, players: Array.from<any>(lobby.players.values()), fresh }, onAck);
             break;
