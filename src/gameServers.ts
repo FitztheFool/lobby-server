@@ -22,6 +22,7 @@ export const GAME_SERVER_URLS: Record<string, string> = {
     cant_stop:  process.env.CANT_STOP_SERVER_URL  ?? 'http://localhost:10013',
     mille_bornes: process.env.MILLE_BORNES_SERVER_URL ?? 'http://localhost:10014',
     spyfall:    process.env.SPYFALL_SERVER_URL    ?? 'http://localhost:10015',
+    atlantide:  process.env.ATLANTIDE_SERVER_URL  ?? 'http://localhost:10016',
 };
 
 // ── Inbound game server connections ───────────────────────────────────────────
@@ -186,6 +187,12 @@ export function sendConfigure(gameType: string, lobbyId: string, lobby: any, onA
                 options: lobby.cantStopOptions ?? { columnsToWin: 3 },
                 fresh,
             }, onAck);
+            break;
+        }
+        case 'atlantide': {
+            const humanPlayers = Array.from<any>(lobby.players.values());
+            const botPlayers = (lobby.botSlots ?? []) as Array<{ userId: string; username: string }>;
+            sock.emit('atlantide:configure', { lobbyId, players: [...humanPlayers, ...botPlayers], fresh }, onAck);
             break;
         }
         case 'mille_bornes': {
