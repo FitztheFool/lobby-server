@@ -23,6 +23,7 @@ export const GAME_SERVER_URLS: Record<string, string> = {
     mille_bornes: process.env.MILLE_BORNES_SERVER_URL ?? 'http://localhost:10014',
     spyfall:    process.env.SPYFALL_SERVER_URL    ?? 'http://localhost:10015',
     atlantide:  process.env.ATLANTIDE_SERVER_URL  ?? 'http://localhost:10016',
+    abalone:    process.env.ABALONE_SERVER_URL    ?? 'http://localhost:10017',
 };
 
 // ── Inbound game server connections ───────────────────────────────────────────
