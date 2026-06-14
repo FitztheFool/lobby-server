@@ -24,6 +24,7 @@ export const GAME_SERVER_URLS: Record<string, string> = {
     spyfall:    process.env.SPYFALL_SERVER_URL    ?? 'http://localhost:10015',
     atlantide:  process.env.ATLANTIDE_SERVER_URL  ?? 'http://localhost:10016',
     abalone:    process.env.ABALONE_SERVER_URL    ?? 'http://localhost:10017',
+    blokus:     process.env.BLOKUS_SERVER_URL     ?? 'http://localhost:10018',
 };
 
 // ── Inbound game server connections ───────────────────────────────────────────
@@ -136,6 +137,12 @@ export function sendConfigure(gameType: string, lobbyId: string, lobby: any, onA
         case 'abalone': {
             const botName = (lobby.bots ?? 0) > 0 ? '🤖 Bot 1' : undefined;
             sock.emit('abalone:configure', { lobbyId, botName, fresh }, onAck);
+            break;
+        }
+        case 'blokus': {
+            const humanPlayers = Array.from<any>(lobby.players.values());
+            const botPlayers = (lobby.botSlots ?? []) as Array<{ userId: string; username: string }>;
+            sock.emit('blokus:configure', { lobbyId, players: [...humanPlayers, ...botPlayers], fresh }, onAck);
             break;
         }
         case 'just_one': {
