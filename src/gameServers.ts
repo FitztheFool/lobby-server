@@ -25,6 +25,7 @@ export const GAME_SERVER_URLS: Record<string, string> = {
     atlantide:  process.env.ATLANTIDE_SERVER_URL  ?? 'http://localhost:10016',
     abalone:    process.env.ABALONE_SERVER_URL    ?? 'http://localhost:10017',
     blokus:     process.env.BLOKUS_SERVER_URL     ?? 'http://localhost:10018',
+    six_qui_prend: process.env.SIX_QUI_PREND_SERVER_URL ?? 'http://localhost:10019',
 };
 
 // ── Inbound game server connections ───────────────────────────────────────────
@@ -143,6 +144,12 @@ export function sendConfigure(gameType: string, lobbyId: string, lobby: any, onA
             const humanPlayers = Array.from<any>(lobby.players.values());
             const botPlayers = (lobby.botSlots ?? []) as Array<{ userId: string; username: string }>;
             sock.emit('blokus:configure', { lobbyId, players: [...humanPlayers, ...botPlayers], fresh }, onAck);
+            break;
+        }
+        case 'six_qui_prend': {
+            const humanPlayers = Array.from<any>(lobby.players.values());
+            const botPlayers = (lobby.botSlots ?? []) as Array<{ userId: string; username: string }>;
+            sock.emit('six:configure', { lobbyId, players: [...humanPlayers, ...botPlayers], fresh }, onAck);
             break;
         }
         case 'just_one': {
