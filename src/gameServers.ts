@@ -106,79 +106,85 @@ export function sendConfigure(gameType: string, lobbyId: string, lobby: any, onA
     if (!sock) { console.log(`[CONF] ${gameType}: no connected game server`); return; }
     const fresh = !!opts?.fresh;
 
+    // Injecte le "temps pour jouer" (timeout AFK) choisi dans le lobby dans CHAQUE configure.
+    // 0 = pas de limite ; null/absent = défaut du jeu.
+    const turnSeconds = lobby.turnSeconds ?? null;
+    const sockEmit = (event: string, payload: Record<string, any>, ack?: () => void) =>
+        sock.emit(event, { ...payload, turnSeconds }, ack);
+
     switch (gameType) {
         case 'uno': {
             const opts = lobby.unoOptions ?? { stackable: false, jumpIn: false, teamMode: 'none', teamWinMode: 'one' };
             const bots = (lobby.botSlots ?? []) as Array<{ userId: string; username: string }>;
-            sock.emit('uno:configure', { lobbyId, options: opts, expectedCount: lobby.players.size, preAssignedTeams: lobby.teams ? Object.fromEntries(lobby.teams) : null, botCount: bots.length, bots, fresh }, onAck);
+            sockEmit('uno:configure', { lobbyId, options: opts, expectedCount: lobby.players.size, preAssignedTeams: lobby.teams ? Object.fromEntries(lobby.teams) : null, botCount: bots.length, bots, fresh }, onAck);
             break;
         }
         case 'taboo': {
             const opts = lobby.tabooOptions ?? { turnDuration: 120, totalRounds: 3, trapWordCount: 5, maxAttempts: 10, trapDuration: 90 };
-            sock.emit('taboo:configure', { lobbyId, options: opts, teams: lobby.teams ? Object.fromEntries(lobby.teams) : null, orators: lobby.orators ?? { '0': null, '1': null }, hostId: lobby.hostId, fresh }, onAck);
+            sockEmit('taboo:configure', { lobbyId, options: opts, teams: lobby.teams ? Object.fromEntries(lobby.teams) : null, orators: lobby.orators ?? { '0': null, '1': null }, hostId: lobby.hostId, fresh }, onAck);
             break;
         }
         case 'skyjow': {
             const humanPlayers = Array.from<any>(lobby.players.values());
             const botPlayers = (lobby.botSlots ?? []) as Array<{ userId: string; username: string }>;
-            sock.emit('skyjow:configure', { lobbyId, players: [...humanPlayers, ...botPlayers], options: lobby.skyjowOptions ?? { eliminateRows: false }, fresh }, onAck);
+            sockEmit('skyjow:configure', { lobbyId, players: [...humanPlayers, ...botPlayers], options: lobby.skyjowOptions ?? { eliminateRows: false }, fresh }, onAck);
             break;
         }
         case 'yahtzee': {
             const humanPlayers = Array.from<any>(lobby.players.values());
             const botPlayers = (lobby.botSlots ?? []) as Array<{ userId: string; username: string }>;
-            sock.emit('yahtzee:configure', { lobbyId, players: [...humanPlayers, ...botPlayers], fresh }, onAck);
+            sockEmit('yahtzee:configure', { lobbyId, players: [...humanPlayers, ...botPlayers], fresh }, onAck);
             break;
         }
         case 'puissance4': {
             const botName = (lobby.bots ?? 0) > 0 ? '🤖 Bot 1' : undefined;
-            sock.emit('p4:configure', { lobbyId, botName, fresh }, onAck);
+            sockEmit('p4:configure', { lobbyId, botName, fresh }, onAck);
             break;
         }
         case 'abalone': {
             const botName = (lobby.bots ?? 0) > 0 ? '🤖 Bot 1' : undefined;
-            sock.emit('abalone:configure', { lobbyId, botName, fresh }, onAck);
+            sockEmit('abalone:configure', { lobbyId, botName, fresh }, onAck);
             break;
         }
         case 'blokus': {
             const humanPlayers = Array.from<any>(lobby.players.values());
             const botPlayers = (lobby.botSlots ?? []) as Array<{ userId: string; username: string }>;
-            sock.emit('blokus:configure', { lobbyId, players: [...humanPlayers, ...botPlayers], fresh }, onAck);
+            sockEmit('blokus:configure', { lobbyId, players: [...humanPlayers, ...botPlayers], fresh }, onAck);
             break;
         }
         case 'six_qui_prend': {
             const humanPlayers = Array.from<any>(lobby.players.values());
             const botPlayers = (lobby.botSlots ?? []) as Array<{ userId: string; username: string }>;
-            sock.emit('six:configure', { lobbyId, players: [...humanPlayers, ...botPlayers], fresh }, onAck);
+            sockEmit('six:configure', { lobbyId, players: [...humanPlayers, ...botPlayers], fresh }, onAck);
             break;
         }
         case 'just_one': {
-            sock.emit('just_one:configure', { lobbyId, players: Array.from<any>(lobby.players.values()), fresh }, onAck);
+            sockEmit('just_one:configure', { lobbyId, players: Array.from<any>(lobby.players.values()), fresh }, onAck);
             break;
         }
         case 'battleship': {
             const botName = (lobby.bots ?? 0) > 0 ? '🤖 Bot 1' : undefined;
-            sock.emit('battleship:configure', { lobbyId, options: lobby.battleshipOptions ?? {}, botName, fresh }, onAck);
+            sockEmit('battleship:configure', { lobbyId, options: lobby.battleshipOptions ?? {}, botName, fresh }, onAck);
             break;
         }
         case 'diamant': {
             const humanPlayers = Array.from(lobby.players.values());
             const botPlayers = (lobby.botSlots ?? []) as Array<{ userId: string; username: string }>;
-            sock.emit('diamant:configure', { lobbyId, players: [...humanPlayers, ...botPlayers], options: lobby.diamantOptions ?? { roundCount: 5 }, fresh }, onAck);
+            sockEmit('diamant:configure', { lobbyId, players: [...humanPlayers, ...botPlayers], options: lobby.diamantOptions ?? { roundCount: 5 }, fresh }, onAck);
             break;
         }
         case 'impostor': {
-            sock.emit('impostor:configure', { lobbyId, players: Array.from<any>(lobby.players.values()), expectedCount: lobby.players.size, options: lobby.impostorOptions ?? { rounds: 1 }, fresh }, onAck);
+            sockEmit('impostor:configure', { lobbyId, players: Array.from<any>(lobby.players.values()), expectedCount: lobby.players.size, options: lobby.impostorOptions ?? { rounds: 1 }, fresh }, onAck);
             break;
         }
         case 'spyfall': {
-            sock.emit('spyfall:configure', { lobbyId, players: Array.from<any>(lobby.players.values()), expectedCount: lobby.players.size, options: lobby.spyfallOptions ?? { exchangesPerPlayer: 2, turnTime: 60 }, fresh }, onAck);
+            sockEmit('spyfall:configure', { lobbyId, players: Array.from<any>(lobby.players.values()), expectedCount: lobby.players.size, options: lobby.spyfallOptions ?? { exchangesPerPlayer: 2, turnTime: 60 }, fresh }, onAck);
             break;
         }
         case 'ludo': {
             const humanPlayers = Array.from<any>(lobby.players.values());
             const botPlayers = (lobby.botSlots ?? []) as Array<{ userId: string; username: string }>;
-            sock.emit('ludo:configure', {
+            sockEmit('ludo:configure', {
                 lobbyId,
                 players: [...humanPlayers, ...botPlayers],
                 options: lobby.ludoOptions ?? { pawnExit: '6', bonusOn6: 'unlimited', winMode: 'first_done', teamMode: 'none' },
@@ -190,7 +196,7 @@ export function sendConfigure(gameType: string, lobbyId: string, lobby: any, onA
         case 'perudo': {
             const humanPlayers = Array.from<any>(lobby.players.values());
             const botPlayers = (lobby.botSlots ?? []) as Array<{ userId: string; username: string }>;
-            sock.emit('perudo:configure', {
+            sockEmit('perudo:configure', {
                 lobbyId,
                 players: [...humanPlayers, ...botPlayers],
                 options: lobby.perudoOptions ?? { initialDice: 5 },
@@ -201,7 +207,7 @@ export function sendConfigure(gameType: string, lobbyId: string, lobby: any, onA
         case 'cant_stop': {
             const humanPlayers = Array.from<any>(lobby.players.values());
             const botPlayers = (lobby.botSlots ?? []) as Array<{ userId: string; username: string }>;
-            sock.emit('cant_stop:configure', {
+            sockEmit('cant_stop:configure', {
                 lobbyId,
                 players: [...humanPlayers, ...botPlayers],
                 options: lobby.cantStopOptions ?? { columnsToWin: 3 },
@@ -212,13 +218,13 @@ export function sendConfigure(gameType: string, lobbyId: string, lobby: any, onA
         case 'atlantide': {
             const humanPlayers = Array.from<any>(lobby.players.values());
             const botPlayers = (lobby.botSlots ?? []) as Array<{ userId: string; username: string }>;
-            sock.emit('atlantide:configure', { lobbyId, players: [...humanPlayers, ...botPlayers], fresh }, onAck);
+            sockEmit('atlantide:configure', { lobbyId, players: [...humanPlayers, ...botPlayers], fresh }, onAck);
             break;
         }
         case 'mille_bornes': {
             const humanPlayers = Array.from<any>(lobby.players.values());
             const botPlayers = (lobby.botSlots ?? []) as Array<{ userId: string; username: string }>;
-            sock.emit('mille_bornes:configure', {
+            sockEmit('mille_bornes:configure', {
                 lobbyId,
                 players: [...humanPlayers, ...botPlayers],
                 options: lobby.mbOptions ?? { target: 1000, teamMode: 'none', teamDistance: 'individual' },
@@ -228,7 +234,7 @@ export function sendConfigure(gameType: string, lobbyId: string, lobby: any, onA
             break;
         }
         default: { // quiz
-            sock.emit('quiz:configure', { lobbyId, quizId: lobby.quizId, hostId: lobby.hostId, players: Array.from<any>(lobby.players.values()), expectedCount: lobby.players.size, timeMode: lobby.timeMode, timePerQuestion: lobby.timePerQuestion, fresh }, onAck);
+            sockEmit('quiz:configure', { lobbyId, quizId: lobby.quizId, hostId: lobby.hostId, players: Array.from<any>(lobby.players.values()), expectedCount: lobby.players.size, timeMode: lobby.timeMode, timePerQuestion: lobby.timePerQuestion, fresh }, onAck);
             break;
         }
     }

@@ -65,6 +65,7 @@ export function emitLobbyState(io: Server, lobbyId: string, lobby: any): void {
         description:     lobby.description ?? null,
         maxPlayers:      lobby.maxPlayers ?? 8,
         isPublic:        lobby.isPublic ?? false,
+        turnSeconds:     lobby.turnSeconds ?? null,
         gameId:          lobby.gameStartPayload?.gameId ?? null,
         bots:            lobby.botSlots?.length ?? lobby.bots ?? 0,
         botSlots:        lobby.botSlots ?? [],

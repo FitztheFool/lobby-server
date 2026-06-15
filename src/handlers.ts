@@ -226,7 +226,7 @@ export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string
 
     // ── Lobby management ──────────────────────────────────────────────────────
 
-    socket.on('lobby:setMeta', ({ title, description, maxPlayers, isPublic }) => {
+    socket.on('lobby:setMeta', ({ title, description, maxPlayers, isPublic, turnSeconds }) => {
         const ctx = getHostLobby(socket, lobbies);
         if (!ctx) return;
         const { lobbyId, lobby } = ctx;
@@ -234,6 +234,11 @@ export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string
         if (typeof description === 'string') lobby.description = description.slice(0, 200);
         if (Number.isFinite(Number(maxPlayers)) && Number(maxPlayers) >= 2) lobby.maxPlayers = Number(maxPlayers);
         if (typeof isPublic === 'boolean') lobby.isPublic = isPublic;
+        // "temps pour jouer" (timeout AFK) : -1/null = défaut du jeu ; 0 = pas de limite ; sinon 10..300 s
+        if (turnSeconds === -1 || turnSeconds === null) lobby.turnSeconds = null;
+        else if (turnSeconds === 0 || (Number.isFinite(Number(turnSeconds)) && Number(turnSeconds) >= 10 && Number(turnSeconds) <= 300)) {
+            lobby.turnSeconds = Number(turnSeconds);
+        }
         emitLobbyState(io, lobbyId, lobby);
         broadcastLobbies(io, lobbies);
     });
