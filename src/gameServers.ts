@@ -26,6 +26,7 @@ export const GAME_SERVER_URLS: Record<string, string> = {
     abalone:    process.env.ABALONE_SERVER_URL    ?? 'http://localhost:10017',
     blokus:     process.env.BLOKUS_SERVER_URL     ?? 'http://localhost:10018',
     six_qui_prend: process.env.SIX_QUI_PREND_SERVER_URL ?? 'http://localhost:10019',
+    tanks:      process.env.TANKS_SERVER_URL      ?? 'http://localhost:10020',
 };
 
 // ── Inbound game server connections ───────────────────────────────────────────
@@ -144,6 +145,11 @@ export function sendConfigure(gameType: string, lobbyId: string, lobby: any, onA
         case 'abalone': {
             const botName = (lobby.bots ?? 0) > 0 ? '🤖 Bot 1' : undefined;
             sockEmit('abalone:configure', { lobbyId, botName, fresh }, onAck);
+            break;
+        }
+        case 'tanks': {
+            const botName = (lobby.bots ?? 0) > 0 ? '🤖 Bot 1' : undefined;
+            sockEmit('tanks:configure', { lobbyId, botName, fresh }, onAck);
             break;
         }
         case 'blokus': {
