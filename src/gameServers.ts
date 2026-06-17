@@ -27,6 +27,7 @@ export const GAME_SERVER_URLS: Record<string, string> = {
     blokus:     process.env.BLOKUS_SERVER_URL     ?? 'http://localhost:10018',
     six_qui_prend: process.env.SIX_QUI_PREND_SERVER_URL ?? 'http://localhost:10019',
     tanks:      process.env.TANKS_SERVER_URL      ?? 'http://localhost:10020',
+    complot:    process.env.COMPLOT_SERVER_URL    ?? 'http://localhost:10021',
 };
 
 // ── Inbound game server connections ───────────────────────────────────────────
@@ -162,6 +163,11 @@ export function sendConfigure(gameType: string, lobbyId: string, lobby: any, onA
             const humanPlayers = Array.from<any>(lobby.players.values());
             const botPlayers = (lobby.botSlots ?? []) as Array<{ userId: string; username: string }>;
             sockEmit('six:configure', { lobbyId, players: [...humanPlayers, ...botPlayers], fresh }, onAck);
+            break;
+        }
+        case 'complot': {
+            const humanPlayers = Array.from<any>(lobby.players.values());
+            sockEmit('complot:configure', { lobbyId, players: humanPlayers, fresh }, onAck);
             break;
         }
         case 'just_one': {

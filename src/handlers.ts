@@ -6,10 +6,10 @@ import { emitLobbyState, broadcastLobbies, buildLobbyList, removePlayerAndMaybeT
 
 const BOT_SUPPORTED_GAMES = new Set(['puissance4', 'yahtzee', 'diamant', 'battleship', 'uno', 'skyjow', 'ludo', 'perudo', 'cant_stop', 'mille_bornes', 'atlantide', 'abalone', 'blokus', 'six_qui_prend', 'tanks']);
 
-const VALID_GAME_TYPES = ['quiz', 'uno', 'taboo', 'skyjow', 'yahtzee', 'puissance4', 'just_one', 'battleship', 'diamant', 'impostor', 'ludo', 'perudo', 'cant_stop', 'mille_bornes', 'spyfall', 'atlantide', 'abalone', 'blokus', 'six_qui_prend', 'tanks'];
+const VALID_GAME_TYPES = ['quiz', 'uno', 'taboo', 'skyjow', 'yahtzee', 'puissance4', 'just_one', 'battleship', 'diamant', 'impostor', 'ludo', 'perudo', 'cant_stop', 'mille_bornes', 'spyfall', 'atlantide', 'abalone', 'blokus', 'six_qui_prend', 'tanks', 'complot'];
 
 const DEFAULT_MAX_PLAYERS: Record<string, number> = {
-    quiz: 30, puissance4: 2, battleship: 2, diamant: 8, impostor: 8, just_one: 7, ludo: 4, perudo: 6, cant_stop: 4, mille_bornes: 4, spyfall: 8, atlantide: 4, abalone: 2, blokus: 4, six_qui_prend: 10, tanks: 2,
+    quiz: 30, puissance4: 2, battleship: 2, diamant: 8, impostor: 8, just_one: 7, ludo: 4, perudo: 6, cant_stop: 4, mille_bornes: 4, spyfall: 8, atlantide: 4, abalone: 2, blokus: 4, six_qui_prend: 10, tanks: 2, complot: 6,
 };
 
 function canStart(lobby: any): boolean {
@@ -31,6 +31,7 @@ function canStart(lobby: any): boolean {
     if (g === 'atlantide' && (lobby.players.size < 1 || total < 2 || total > 4)) return false;
     if (g === 'blokus' && (lobby.players.size < 1 || total < 2 || total > 4)) return false;
     if (g === 'six_qui_prend' && (lobby.players.size < 1 || total < 2 || total > 10)) return false;
+    if (g === 'complot' && (lobby.players.size < 2 || lobby.players.size > 6)) return false;
     if (g === 'taboo') {
         if (!lobby.teams || lobby.teams.size < 4) return false;
         const t0 = Array.from<number>(lobby.teams.values()).filter(t => t === 0).length;
