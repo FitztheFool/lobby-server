@@ -230,7 +230,7 @@ export function sendConfigure(gameType: string, lobbyId: string, lobby: any, onA
         case 'atlantide': {
             const humanPlayers = Array.from<any>(lobby.players.values());
             const botPlayers = (lobby.botSlots ?? []) as Array<{ userId: string; username: string }>;
-            sockEmit('atlantide:configure', { lobbyId, players: [...humanPlayers, ...botPlayers], fresh }, onAck);
+            sockEmit('atlantide:configure', { lobbyId, players: [...humanPlayers, ...botPlayers], options: lobby.atlantideOptions ?? { placement: 'auto', earlyEnd: false }, fresh }, onAck);
             break;
         }
         case 'mille_bornes': {

@@ -164,6 +164,7 @@ export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string
                 perudoOptions: { initialDice: 5 },
                 cantStopOptions: { columnsToWin: 3 },
                 mbOptions: { target: 1000, teamMode: 'none', teamDistance: 'individual' },
+                atlantideOptions: { placement: 'auto', earlyEnd: false },
                 orators: { '0': null, '1': null },
             };
         }
@@ -411,6 +412,16 @@ export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string
         const { lobbyId, lobby } = ctx;
         lobby.skyjowOptions ||= { eliminateRows: false };
         if (typeof eliminateRows === 'boolean') lobby.skyjowOptions.eliminateRows = eliminateRows;
+        emitLobbyState(io, lobbyId, lobby);
+    });
+
+    socket.on('lobby:setAtlantideOptions', ({ placement, earlyEnd }) => {
+        const ctx = getHostLobby(socket, lobbies);
+        if (!ctx) return;
+        const { lobbyId, lobby } = ctx;
+        lobby.atlantideOptions ||= { placement: 'auto', earlyEnd: false };
+        if (placement === 'auto' || placement === 'manual') lobby.atlantideOptions.placement = placement;
+        if (typeof earlyEnd === 'boolean') lobby.atlantideOptions.earlyEnd = earlyEnd;
         emitLobbyState(io, lobbyId, lobby);
     });
 

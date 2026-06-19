@@ -61,6 +61,7 @@ export function emitLobbyState(io: Server, lobbyId: string, lobby: any): void {
         perudoOptions:   lobby.perudoOptions ?? { initialDice: 5 },
         cantStopOptions: lobby.cantStopOptions ?? { columnsToWin: 3 },
         mbOptions:       lobby.mbOptions ?? { target: 1000, teamMode: 'none', teamDistance: 'individual' },
+        atlantideOptions: lobby.atlantideOptions ?? { placement: 'auto', earlyEnd: false },
         title:           lobby.title ?? null,
         description:     lobby.description ?? null,
         maxPlayers:      lobby.maxPlayers ?? 8,
