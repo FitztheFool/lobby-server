@@ -12,6 +12,38 @@ const DEFAULT_MAX_PLAYERS: Record<string, number> = {
     quiz: 30, puissance4: 2, battleship: 2, diamant: 8, impostor: 8, just_one: 7, ludo: 4, perudo: 6, cant_stop: 4, mille_bornes: 4, spyfall: 8, atlantide: 4, abalone: 2, blokus: 4, six_qui_prend: 10, tanks: 2, complot: 6,
 };
 
+// Jeux désactivés par l'admin (clés = clés de GAME_CONFIG côté front, identiques aux gameType ici).
+// On met en cache la liste pour ne pas appeler le front à chaque action.
+let enabledGamesCache: { set: Set<string>; at: number } | null = null;
+const ENABLED_CACHE_MS = 30_000;
+
+async function getEnabledGameTypes(): Promise<Set<string> | null> {
+    if (enabledGamesCache && Date.now() - enabledGamesCache.at < ENABLED_CACHE_MS) {
+        return enabledGamesCache.set;
+    }
+    const frontendUrl = process.env.FRONTEND_URL;
+    if (!frontendUrl) return null; // pas de front configuré → on n'empêche rien
+    try {
+        const res = await fetch(`${frontendUrl}/api/games/enabled`, { signal: AbortSignal.timeout(5_000) });
+        if (!res.ok) return enabledGamesCache?.set ?? null;
+        const { enabled } = await res.json() as { enabled: string[] };
+        const set = new Set(enabled);
+        enabledGamesCache = { set, at: Date.now() };
+        return set;
+    } catch {
+        // En cas d'erreur réseau, on retombe sur le dernier cache connu (ou null = on n'empêche rien).
+        return enabledGamesCache?.set ?? null;
+    }
+}
+
+/** Un jeu est jouable s'il est activé (ou si on ne peut pas vérifier). Le quiz est toujours autorisé. */
+async function isGameTypeEnabled(gameType: string): Promise<boolean> {
+    if (gameType === 'quiz') return true;
+    const enabled = await getEnabledGameTypes();
+    if (!enabled) return true; // impossible de vérifier → on laisse passer
+    return enabled.has(gameType);
+}
+
 function canStart(lobby: any): boolean {
     const g = lobby.gameType ?? 'quiz';
     const total = lobby.players.size + (lobby.bots ?? 0);
@@ -315,11 +347,16 @@ export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string
 
     // ── Game options ──────────────────────────────────────────────────────────
 
-    socket.on('lobby:setGameType', ({ gameType }) => {
+    socket.on('lobby:setGameType', async ({ gameType }) => {
         const ctx = getHostLobby(socket, lobbies);
         if (!ctx) return;
         const { lobbyId, lobby } = ctx;
         if (!VALID_GAME_TYPES.includes(gameType)) return;
+        // Refuse de basculer vers un jeu désactivé par l'admin.
+        if (!(await isGameTypeEnabled(gameType))) {
+            socket.emit('lobby:error', { message: 'Ce jeu est actuellement indisponible.' });
+            return;
+        }
         lobby.gameType = gameType;
         lobby.bots = 0;
         lobby.botSlots = [];
@@ -547,6 +584,13 @@ export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string
         if (!canStart(lobby)) { console.log(`[START] abort: canStart=false for ${lobbyId} (${lobby.gameType}, ${lobby.players.size} players)`); return; }
 
         const gameType = lobby.gameType ?? 'quiz';
+
+        // Garde serveur : on refuse de lancer un jeu désactivé par l'admin.
+        if (!(await isGameTypeEnabled(gameType))) {
+            console.log(`[START] abort: game ${gameType} is disabled by admin`);
+            io.to(`lobby:${lobbyId}`).emit('lobby:error', { message: 'Ce jeu est actuellement indisponible.' });
+            return;
+        }
 
         const doWake = async () => {
             io.to(`lobby:${lobbyId}`).emit('lobby:server_warming', { estimatedSeconds: 60 });
