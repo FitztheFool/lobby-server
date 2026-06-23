@@ -8,6 +8,7 @@ import { Server } from 'socket.io';
 import { corsConfig, setupSocketAuth } from '@kwizar/shared';
 import { registerGameServer, GAME_SERVER_URLS } from './gameServers';
 import { registerHandlers } from './handlers';
+import { broadcastLobbies, purgeLobbyInvites } from './lobbyHelpers';
 
 const app = express();
 app.get('/health', cors(), (_req, res) => res.status(200).send('ok'));
@@ -35,6 +36,47 @@ app.post('/internal/emit', express.json({ limit: '64kb' }), (req, res) => {
         return;
     }
     io.to(room).emit(event, payload);
+    res.json({ ok: true });
+});
+
+// ── Admin: lister les lobbies actifs (proxy par Next /api/admin/lobbies) ────────
+app.get('/internal/lobbies', (req, res) => {
+    if (!authorizedInternal(req.headers.authorization ?? '')) {
+        res.status(401).json({ error: 'unauthorized' });
+        return;
+    }
+    // Liste admin : inclut les lobbies privés (contrairement à la liste publique).
+    const list = Array.from(lobbies.entries()).map(([id, lobby]: [string, any]) => ({
+        id,
+        title:          lobby.title ?? `Lobby de ${Array.from<any>(lobby.players.values())[0]?.username ?? '?'}`,
+        gameType:       lobby.gameType ?? 'quiz',
+        status:         lobby.status === 'WAITING' ? 'waiting' : 'in-progress',
+        isPublic:       lobby.isPublic !== false,
+        host:           Array.from<any>(lobby.players.values()).find((p: any) => p.userId === lobby.hostId)?.username ?? '?',
+        currentPlayers: lobby.players.size + (lobby.bots ?? 0),
+        maxPlayers:     lobby.maxPlayers ?? 8,
+        playerNames:    Array.from<any>(lobby.players.values()).map((p: any) => p.username),
+    }));
+    res.json({ lobbies: list, total: list.length });
+});
+
+// ── Admin: forcer la fermeture d'un lobby bloqué ───────────────────────────────
+app.post('/internal/lobbies/close', express.json({ limit: '16kb' }), (req, res) => {
+    if (!authorizedInternal(req.headers.authorization ?? '')) {
+        res.status(401).json({ error: 'unauthorized' });
+        return;
+    }
+    const { lobbyId } = req.body ?? {};
+    if (typeof lobbyId !== 'string' || !lobbies.has(lobbyId)) {
+        res.status(404).json({ error: 'not_found' });
+        return;
+    }
+    const room = `lobby:${lobbyId}`;
+    io.to(room).emit('lobby:kicked');   // les clients réutilisent le flux « kické » pour sortir proprement
+    io.in(room).socketsLeave(room);
+    lobbies.delete(lobbyId);
+    void purgeLobbyInvites(lobbyId);
+    broadcastLobbies(io, lobbies);
     res.json({ ok: true });
 });
 
