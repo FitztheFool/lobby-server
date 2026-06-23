@@ -28,6 +28,7 @@ export const GAME_SERVER_URLS: Record<string, string> = {
     six_qui_prend: process.env.SIX_QUI_PREND_SERVER_URL ?? 'http://localhost:10019',
     tanks:      process.env.TANKS_SERVER_URL      ?? 'http://localhost:10020',
     complot:    process.env.COMPLOT_SERVER_URL    ?? 'http://localhost:10021',
+    dames:      process.env.DAMES_SERVER_URL      ?? 'http://localhost:10022',
 };
 
 // ── Inbound game server connections ───────────────────────────────────────────
@@ -151,6 +152,11 @@ export function sendConfigure(gameType: string, lobbyId: string, lobby: any, onA
         case 'tanks': {
             const botName = (lobby.bots ?? 0) > 0 ? '🤖 Bot 1' : undefined;
             sockEmit('tanks:configure', { lobbyId, botName, fresh }, onAck);
+            break;
+        }
+        case 'dames': {
+            const botName = (lobby.bots ?? 0) > 0 ? '🤖 Bot 1' : undefined;
+            sockEmit('dames:configure', { lobbyId, botName, fresh }, onAck);
             break;
         }
         case 'blokus': {

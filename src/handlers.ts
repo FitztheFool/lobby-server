@@ -6,7 +6,7 @@ import { emitLobbyState, broadcastLobbies, buildLobbyList, removePlayerAndMaybeT
 
 const BOT_SUPPORTED_GAMES = new Set(['puissance4', 'yahtzee', 'diamant', 'battleship', 'uno', 'skyjow', 'ludo', 'perudo', 'cant_stop', 'mille_bornes', 'atlantide', 'abalone', 'blokus', 'six_qui_prend', 'tanks']);
 
-const VALID_GAME_TYPES = ['quiz', 'uno', 'taboo', 'skyjow', 'yahtzee', 'puissance4', 'just_one', 'battleship', 'diamant', 'impostor', 'ludo', 'perudo', 'cant_stop', 'mille_bornes', 'spyfall', 'atlantide', 'abalone', 'blokus', 'six_qui_prend', 'tanks', 'complot'];
+const VALID_GAME_TYPES = ['quiz', 'uno', 'taboo', 'skyjow', 'yahtzee', 'puissance4', 'just_one', 'battleship', 'diamant', 'impostor', 'ludo', 'perudo', 'cant_stop', 'mille_bornes', 'spyfall', 'atlantide', 'abalone', 'blokus', 'six_qui_prend', 'tanks', 'complot', 'dames'];
 
 const DEFAULT_MAX_PLAYERS: Record<string, number> = {
     quiz: 30, puissance4: 2, battleship: 2, diamant: 8, impostor: 8, just_one: 7, ludo: 4, perudo: 6, cant_stop: 4, mille_bornes: 4, spyfall: 8, atlantide: 4, abalone: 2, blokus: 4, six_qui_prend: 10, tanks: 2, complot: 6,
