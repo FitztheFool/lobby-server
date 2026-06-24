@@ -50,7 +50,7 @@ function canStart(lobby: any): boolean {
     if (g === 'quiz' && (!lobby.quizId || lobby.players.size < 1)) return false;
     if (g === 'uno' && total < 2) return false;
     if (g === 'skyjow' && (total < 2 || total > 8)) return false;
-    if ((g === 'puissance4' || g === 'battleship' || g === 'abalone' || g === 'tanks') && total !== 2) return false;
+    if ((g === 'puissance4' || g === 'battleship' || g === 'abalone' || g === 'tanks' || g === 'dames') && total !== 2) return false;
     if (g === 'yahtzee' && (lobby.players.size < 1 || total < 2 || total > 8)) return false;
     if (g === 'just_one' && lobby.players.size < 3) return false;
     if (g === 'diamant' && (lobby.players.size < 1 || total < 2 || total > 8)) return false;
