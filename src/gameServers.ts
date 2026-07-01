@@ -217,7 +217,7 @@ export function sendConfigure(gameType: string, lobbyId: string, lobby: any, onA
             sockEmit('perudo:configure', {
                 lobbyId,
                 players: [...humanPlayers, ...botPlayers],
-                options: lobby.perudoOptions ?? { initialDice: 5 },
+                options: lobby.perudoOptions ?? { initialDice: 5, calza: false },
                 fresh,
             }, onAck);
             break;

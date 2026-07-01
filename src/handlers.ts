@@ -193,7 +193,7 @@ export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string
                 impostorOptions: { rounds: 1, timePerRound: 60 },
                 spyfallOptions: { exchangesPerPlayer: 2, turnTime: 60 },
                 ludoOptions: { pawnExit: '6', bonusOn6: 'unlimited', winMode: 'first_done', teamMode: 'none' },
-                perudoOptions: { initialDice: 5 },
+                perudoOptions: { initialDice: 5, calza: false },
                 cantStopOptions: { columnsToWin: 3 },
                 mbOptions: { target: 1000, teamMode: 'none', teamDistance: 'individual' },
                 atlantideOptions: { placement: 'auto', earlyEnd: false },
@@ -223,7 +223,7 @@ export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string
         lobby.impostorOptions   ||= { rounds: 1, timePerRound: 60 };
         lobby.spyfallOptions    ||= { exchangesPerPlayer: 2, turnTime: 40 };
         lobby.ludoOptions       ||= { pawnExit: '6', bonusOn6: 'unlimited', winMode: 'first_done', teamMode: 'none' };
-        lobby.perudoOptions     ||= { initialDice: 5 };
+        lobby.perudoOptions     ||= { initialDice: 5, calza: false };
         lobby.cantStopOptions   ||= { columnsToWin: 3 };
         lobby.mbOptions         ||= { target: 1000, teamMode: 'none', teamDistance: 'individual' };
 
@@ -485,13 +485,14 @@ export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string
         emitLobbyState(io, lobbyId, lobby);
     });
 
-    socket.on('lobby:setPerudoOptions', ({ initialDice }) => {
+    socket.on('lobby:setPerudoOptions', ({ initialDice, calza }) => {
         const ctx = getHostLobby(socket, lobbies);
         if (!ctx) return;
         const { lobbyId, lobby } = ctx;
-        lobby.perudoOptions ||= { initialDice: 5 };
+        lobby.perudoOptions ||= { initialDice: 5, calza: false };
         const d = numOpt(initialDice, 3, 6);
         if (d !== undefined) lobby.perudoOptions.initialDice = d;
+        if (calza !== undefined) lobby.perudoOptions.calza = !!calza;
         emitLobbyState(io, lobbyId, lobby);
     });
 
@@ -584,8 +585,20 @@ export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string
         if (!canStart(lobby)) { console.log(`[START] abort: canStart=false for ${lobbyId} (${lobby.gameType}, ${lobby.players.size} players)`); return; }
 
         const gameType = lobby.gameType ?? 'quiz';
+        const gsUrl = GAME_SERVER_URLS[gameType];
+        const needsWake = !gameServerConnections.has(gameType);
+
+        // Réveil immédiat : on émet le loader et on tape /health AVANT le contrôle
+        // d'activation (fetch vers /api/games/enabled, timeout 5s sur cold start).
+        // Le chrono de boot du serveur de jeu démarre tout de suite et le client
+        // affiche l'écran de chargement sans attendre ce roundtrip.
+        if (needsWake) {
+            io.to(`lobby:${lobbyId}`).emit('lobby:server_warming', { estimatedSeconds: 60 });
+            if (gsUrl) fetch(`${gsUrl}/health`, { signal: AbortSignal.timeout(5_000) }).catch(() => {});
+        }
 
         // Garde serveur : on refuse de lancer un jeu désactivé par l'admin.
+        // Tourne en parallèle du réveil ci-dessus.
         if (!(await isGameTypeEnabled(gameType))) {
             console.log(`[START] abort: game ${gameType} is disabled by admin`);
             io.to(`lobby:${lobbyId}`).emit('lobby:error', { message: 'Ce jeu est actuellement indisponible.' });
@@ -594,14 +607,13 @@ export function registerHandlers(io: Server, socket: Socket, lobbies: Map<string
 
         const doWake = async () => {
             io.to(`lobby:${lobbyId}`).emit('lobby:server_warming', { estimatedSeconds: 60 });
-            const gsUrl = GAME_SERVER_URLS[gameType];
             if (gsUrl) fetch(`${gsUrl}/health`, { signal: AbortSignal.timeout(5_000) }).catch(() => {});
             await ensureConnected(gameType);
         };
 
-        if (!gameServerConnections.has(gameType)) {
+        if (needsWake) {
             try {
-                await doWake();
+                await ensureConnected(gameType);
             } catch {
                 io.to(`lobby:${lobbyId}`).emit('lobby:server_error');
                 lobby.status = 'WAITING';
