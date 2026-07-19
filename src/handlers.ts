@@ -4,12 +4,12 @@ import { Server, Socket } from 'socket.io';
 import { gameServerConnections, ensureConnected, preWarm, sendConfigure, GAME_SERVER_URLS } from './gameServers';
 import { emitLobbyState, broadcastLobbies, buildLobbyList, removePlayerAndMaybeTransferHost, autoFillBotTeams, purgeLobbyInvites } from './lobbyHelpers';
 
-const BOT_SUPPORTED_GAMES = new Set(['puissance4', 'yahtzee', 'diamant', 'battleship', 'uno', 'skyjow', 'ludo', 'perudo', 'cant_stop', 'mille_bornes', 'atlantide', 'abalone', 'blokus', 'six_qui_prend', 'tanks', 'dames']);
+const BOT_SUPPORTED_GAMES = new Set(['puissance4', 'yahtzee', 'diamant', 'battleship', 'uno', 'skyjow', 'ludo', 'perudo', 'cant_stop', 'mille_bornes', 'atlantide', 'abalone', 'blokus', 'six_qui_prend', 'tanks', 'dames', 'backgammon']);
 
-const VALID_GAME_TYPES = ['quiz', 'uno', 'taboo', 'skyjow', 'yahtzee', 'puissance4', 'just_one', 'battleship', 'diamant', 'impostor', 'ludo', 'perudo', 'cant_stop', 'mille_bornes', 'spyfall', 'atlantide', 'abalone', 'blokus', 'six_qui_prend', 'tanks', 'complot', 'dames'];
+const VALID_GAME_TYPES = ['quiz', 'uno', 'taboo', 'skyjow', 'yahtzee', 'puissance4', 'just_one', 'battleship', 'diamant', 'impostor', 'ludo', 'perudo', 'cant_stop', 'mille_bornes', 'spyfall', 'atlantide', 'abalone', 'blokus', 'six_qui_prend', 'tanks', 'complot', 'dames', 'backgammon'];
 
 const DEFAULT_MAX_PLAYERS: Record<string, number> = {
-    quiz: 30, puissance4: 2, battleship: 2, diamant: 8, impostor: 8, just_one: 7, ludo: 4, perudo: 6, cant_stop: 4, mille_bornes: 4, spyfall: 8, atlantide: 4, abalone: 2, blokus: 4, six_qui_prend: 10, tanks: 2, complot: 6, dames: 2,
+    quiz: 30, puissance4: 2, battleship: 2, diamant: 8, impostor: 8, just_one: 7, ludo: 4, perudo: 6, cant_stop: 4, mille_bornes: 4, spyfall: 8, atlantide: 4, abalone: 2, blokus: 4, six_qui_prend: 10, tanks: 2, complot: 6, dames: 2, backgammon: 2,
 };
 
 // Jeux désactivés par l'admin (clés = clés de GAME_CONFIG côté front, identiques aux gameType ici).
@@ -50,7 +50,7 @@ function canStart(lobby: any): boolean {
     if (g === 'quiz' && (!lobby.quizId || lobby.players.size < 1)) return false;
     if (g === 'uno' && total < 2) return false;
     if (g === 'skyjow' && (total < 2 || total > 8)) return false;
-    if ((g === 'puissance4' || g === 'battleship' || g === 'abalone' || g === 'tanks' || g === 'dames') && total !== 2) return false;
+    if ((g === 'puissance4' || g === 'battleship' || g === 'abalone' || g === 'tanks' || g === 'dames' || g === 'backgammon') && total !== 2) return false;
     if (g === 'yahtzee' && (lobby.players.size < 1 || total < 2 || total > 8)) return false;
     if (g === 'just_one' && lobby.players.size < 3) return false;
     if (g === 'diamant' && (lobby.players.size < 1 || total < 2 || total > 8)) return false;

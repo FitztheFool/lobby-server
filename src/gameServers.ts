@@ -29,6 +29,7 @@ export const GAME_SERVER_URLS: Record<string, string> = {
     tanks:      process.env.TANKS_SERVER_URL      ?? 'http://localhost:10020',
     complot:    process.env.COMPLOT_SERVER_URL    ?? 'http://localhost:10021',
     dames:      process.env.DAMES_SERVER_URL      ?? 'http://localhost:10022',
+    backgammon: process.env.BACKGAMMON_SERVER_URL ?? 'http://localhost:10023',
 };
 
 // ── Inbound game server connections ───────────────────────────────────────────
@@ -157,6 +158,11 @@ export function sendConfigure(gameType: string, lobbyId: string, lobby: any, onA
         case 'dames': {
             const botName = (lobby.bots ?? 0) > 0 ? '🤖 Bot 1' : undefined;
             sockEmit('dames:configure', { lobbyId, botName, fresh }, onAck);
+            break;
+        }
+        case 'backgammon': {
+            const botName = (lobby.bots ?? 0) > 0 ? '🤖 Bot 1' : undefined;
+            sockEmit('backgammon:configure', { lobbyId, botName, fresh }, onAck);
             break;
         }
         case 'blokus': {
